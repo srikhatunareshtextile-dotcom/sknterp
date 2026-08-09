@@ -372,6 +372,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (sPath) sPath.textContent = `Path: ${data.sqlite_path || 'Local'}`;
 
+        // Last Sync Time indicators
+        if (data.last_sync_time) {
+          const syncTxt = "Last Synced: " + data.last_sync_time;
+          const el1 = document.getElementById("cloud-sync-last-time");
+          const el2 = document.getElementById("header-sync-time");
+          if (el1) el1.innerText = syncTxt;
+          if (el2) el2.innerText = "Sync: " + data.last_sync_time;
+        }
+
         // SQL Server indicators
         if (data.sql_server_status === "Online") {
           if (bSqlserver) bSqlserver.className = "badge badge-online";
