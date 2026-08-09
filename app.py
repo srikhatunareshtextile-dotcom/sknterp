@@ -23,13 +23,20 @@ CHALLAN_IMAGES_MAP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)
 os.makedirs(CHALLAN_IMAGES_DIR, exist_ok=True)
 
 def load_challan_images_map():
+    res = {}
     if os.path.exists(CHALLAN_IMAGES_MAP_FILE):
         try:
             with open(CHALLAN_IMAGES_MAP_FILE, "r") as f:
-                return json.load(f)
+                res = json.load(f)
         except Exception as e:
             print(f"Error loading challan_images.json: {e}")
-    return {}
+    snap = load_cloud_snapshot()
+    if snap and "images_map" in snap:
+        snap_map = snap.get("images_map", {})
+        for k, v in snap_map.items():
+            if k not in res or not res[k]:
+                res[k] = v
+    return res
 
 def save_challan_images_map(data_map):
     try:
@@ -193,16 +200,26 @@ def _detect_best_odbc_driver(pyodbc_mod):
 
 def load_settings():
     # Local SQLite DB configuration
-    local_db = DEFAULT_LOCAL_DB
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    local_db = os.path.join(app_dir, "packing_slips.db")
+    user_db = DEFAULT_LOCAL_DB
+    if os.path.exists(user_db):
+        local_db = user_db
+
     if os.path.exists(SETTINGS_FILE_PS):
         try:
             with open(SETTINGS_FILE_PS, "r") as f:
                 s = json.load(f)
                 lan = s.get("lan_db_path", "").strip()
-                if lan:
+                if lan and (os.path.exists(lan) or os.path.exists(os.path.dirname(lan))):
                     local_db = lan
         except Exception:
             pass
+
+    try:
+        init_local_db(local_db)
+    except Exception as _e:
+        print(f"init_local_db note: {_e}")
 
     # Remote SQL Server configuration
     pyodbc_mod = try_import_pyodbc()
@@ -790,6 +807,8 @@ def get_dashboard():
     local_db, sql_settings = load_settings()
     
     # Check SQLite Status
+    sqlite_ok = False
+    slip_count = 0
     try:
         conn = get_local_sqlite_connection(local_db)
         c = conn.cursor()
@@ -798,9 +817,16 @@ def get_dashboard():
         conn.close()
         sqlite_ok = True
     except Exception as e:
-        slip_count = 0
-        sqlite_ok = False
         print(f"SQLite Connection error: {e}")
+
+    # Fallback to cloud snapshot for count if on cloud
+    if not sqlite_ok or is_cloud_mode():
+        snap = load_cloud_snapshot()
+        if snap:
+            snap_slips = snap.get("reports", {}).get("packing_slips", [])
+            if not slip_count:
+                slip_count = len(snap_slips)
+            sqlite_ok = True
 
     # Check SQL Server Status
     sql_server_ok = False
@@ -830,8 +856,49 @@ def get_dashboard():
 
 def auto_populate_slip_items(local_db, slip_id, party, group_name=None):
     pyodbc_installed = try_import_pyodbc() is not None
-    if not pyodbc_installed:
-        raise Exception("pyodbc is not installed on the server PC.")
+
+    # === CLOUD FALLBACK for auto populate packing slip ===
+    if not pyodbc_installed or is_cloud_mode():
+        snap = load_cloud_snapshot()
+        if not snap:
+            raise Exception("Cloud snapshot not available.")
+        reports = snap.get("reports", {})
+        order_details = reports.get("order_details", [])
+        group_stock = reports.get("group_stock", {})
+
+        target_party = party.strip().upper()
+        target_group = group_name.strip().upper() if group_name else ""
+
+        sqlite_conn = sqlite3.connect(local_db)
+        sqlite_cur = sqlite_conn.cursor()
+        inserted_count = 0
+
+        for od in order_details:
+            p = str(od.get("party", "") or "").strip().upper()
+            if p != target_party:
+                continue
+            grp = str(od.get("group_name", "") or "").strip().upper()
+            if target_group and grp != target_group:
+                continue
+
+            bal_pcs = float(od.get("bal_pcs", 0) or 0)
+            if bal_pcs <= 0:
+                continue
+
+            stk_pcs = float(group_stock.get(grp, 0) or 0)
+            ord_pcs = float(od.get("order_pcs", 0) or bal_pcs)
+
+            sqlite_cur.execute("""
+                INSERT INTO packing_slip_items 
+                (slip_id, order_no, order_date, party, group_name, item_name, order_pcs, stock_pcs, bal_pcs, pack_pcs, pack_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (slip_id, od.get("order_no", ""), od.get("order_date", ""), od.get("party", party), grp, od.get("item_name", grp), ord_pcs, stk_pcs, bal_pcs, bal_pcs, ""))
+            inserted_count += 1
+
+        sqlite_conn.commit()
+        sqlite_conn.close()
+        return inserted_count
+    # === END CLOUD FALLBACK ===
 
     _, sql_settings = load_settings()
     
@@ -983,7 +1050,12 @@ def auto_populate_slip_items(local_db, slip_id, party, group_name=None):
 def get_parties():
     _, sql_settings = load_settings()
     pyodbc = try_import_pyodbc()
-    if pyodbc is None:
+    if pyodbc is None or is_cloud_mode():
+        snap = load_cloud_snapshot()
+        if snap:
+            ods = snap.get("reports", {}).get("order_details", [])
+            parties = sorted(list({str(od.get("party", "") or "").strip() for od in ods if od.get("party")}))
+            return jsonify(parties)
         return jsonify([])
     try:
         conn = get_sql_server_connection(sql_settings)
@@ -1004,7 +1076,12 @@ def get_parties():
 def get_groups():
     _, sql_settings = load_settings()
     pyodbc = try_import_pyodbc()
-    if pyodbc is None:
+    if pyodbc is None or is_cloud_mode():
+        snap = load_cloud_snapshot()
+        if snap:
+            ods = snap.get("reports", {}).get("order_details", [])
+            groups = sorted(list({str(od.get("group_name", "") or "").strip() for od in ods if od.get("group_name")}))
+            return jsonify(groups)
         return jsonify([])
     db_curr = sql_settings.get("db_name", "EQSKNT20262027")
     try:
@@ -1026,9 +1103,9 @@ def get_groups():
 def get_party_pending_items(party_name):
     local_db, sql_settings = load_settings()
     pyodbc = try_import_pyodbc()
-    if pyodbc is None:
-        return jsonify({"error": "pyodbc not installed"}), 500
-    
+    if pyodbc is None or is_cloud_mode():
+        return jsonify([])
+
     try:
         conn = get_sql_server_connection(sql_settings)
     except Exception as e:
@@ -1821,8 +1898,8 @@ def get_purchase_stock_report():
     """
     _, sql_settings = load_settings()
     pyodbc_mod = try_import_pyodbc()
-    if pyodbc_mod is None:
-        return jsonify({"error": "pyodbc not installed on server PC."}), 500
+    if pyodbc_mod is None or is_cloud_mode():
+        return jsonify({"rows": [], "message": "Purchase stock requires direct SQL Server connection. Not available in cloud mode.", "cloud_mode": True})
 
     # Query parameters
     search_query = request.args.get("search", "").strip().upper()
@@ -2151,8 +2228,8 @@ def run_script():
 def api_bill_report():
     _, sql_settings = load_settings()
     pyodbc_installed = try_import_pyodbc() is not None
-    if not pyodbc_installed:
-        return jsonify({"error": "pyodbc not installed on server PC."}), 500
+    if not pyodbc_installed or is_cloud_mode():
+        return jsonify({"rows": [], "message": "Bill report requires direct SQL Server connection. Not available in cloud mode.", "cloud_mode": True})
 
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
@@ -2199,19 +2276,56 @@ def api_bill_report_filters():
 def api_job_issue_report():
     _, sql_settings = load_settings()
     status_filter = request.args.get("status", "Pending").strip()
-    jobber = request.args.get("jobber", "").strip()
-    item = request.args.get("item", "").strip()
-    inw_type = request.args.get("inw_type", "All").strip()
-    date_from = request.args.get("date_from", "").strip()
-    date_to = request.args.get("date_to", "").strip()
+    jobber_filter = request.args.get("jobber", "").strip().upper()
+    item_filter = request.args.get("item", "").strip().upper()
     include_opening = request.args.get("include_opening", "false").strip().lower() in ("true", "1", "yes")
 
+    # === CLOUD FALLBACK ===
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify({"error": "Cloud snapshot not available. Please sync from local server.", "cloud_mode": True}), 503
+        all_rows = snap.get("reports", {}).get("job_issue", [])
+        data = []
+        for ji in all_rows:
+            if not include_opening and ji.get("is_opening"):
+                continue
+            item_name = str(ji.get("itemname", "") or "").strip().upper()
+            jbr = str(ji.get("jobber", "") or "").strip().upper()
+            if item_filter and item_filter not in item_name:
+                continue
+            if jobber_filter and jobber_filter not in jbr:
+                continue
+            data.append(ji)
+        non_opening = [r for r in data if not r.get("is_opening")]
+        def safe_sum(lst, key):
+            return sum(float(r.get(key, 0) or 0) for r in lst)
+        return jsonify({
+            "status": "success",
+            "total_rows": len(data),
+            "total_pcs": safe_sum(non_opening, "pcs"),
+            "total_plainpcs": safe_sum(non_opening, "plainpcs"),
+            "total_recpcs": safe_sum(non_opening, "recpcs"),
+            "total_secpcs": safe_sum(non_opening, "secpcs"),
+            "total_shtpcs": safe_sum(non_opening, "shtpcs"),
+            "total_balpcs": safe_sum(data, "balpcs"),
+            "total_wastepcs": safe_sum(non_opening, "wastepcs"),
+            "total_retpcs": safe_sum(non_opening, "retpcs"),
+            "from_snapshot": True,
+            "snapshot_time": snap.get("sync_time", ""),
+            "data": data
+        })
+    # === END CLOUD FALLBACK ===
+
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    inw_type = request.args.get("inw_type", "All").strip()
     try:
         data = query_job_issue_report(
             sql_settings,
             status=status_filter,
-            jobber=jobber,
-            item=item,
+            jobber=request.args.get("jobber", "").strip(),
+            item=request.args.get("item", "").strip(),
             inw_type=inw_type,
             date_from=date_from,
             date_to=date_to,
@@ -2240,20 +2354,56 @@ def api_job_reprocess_report():
     _, sql_settings = load_settings()
     job_type = request.args.get("job_type", "All").strip()
     status_filter = request.args.get("status", "Pending").strip()
-    jobber = request.args.get("jobber", "").strip()
-    item = request.args.get("item", "").strip()
-    inw_type = request.args.get("inw_type", "All").strip()
-    date_from = request.args.get("date_from", "").strip()
-    date_to = request.args.get("date_to", "").strip()
+    jobber_filter = request.args.get("jobber", "").strip().upper()
+    item_filter = request.args.get("item", "").strip().upper()
     include_opening = request.args.get("include_opening", "false").strip().lower() in ("true", "1", "yes")
 
+    # === CLOUD FALLBACK ===
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify({"error": "Cloud snapshot not available. Please sync from local server.", "cloud_mode": True}), 503
+        all_rows = snap.get("reports", {}).get("reprocess_stock", [])
+        data = []
+        for rp in all_rows:
+            if not include_opening and rp.get("is_opening"):
+                continue
+            item_name = str(rp.get("itemname", "") or "").strip().upper()
+            jbr = str(rp.get("jobber", "") or "").strip().upper()
+            jtype = str(rp.get("jobtype", "") or "").strip().upper()
+            if item_filter and item_filter not in item_name:
+                continue
+            if jobber_filter and jobber_filter not in jbr:
+                continue
+            if job_type and job_type.upper() != "ALL" and jtype != job_type.upper():
+                continue
+            data.append(rp)
+        non_opening = [r for r in data if not r.get("is_opening")]
+        def safe_sum(lst, key):
+            return sum(float(r.get(key, 0) or 0) for r in lst)
+        return jsonify({
+            "status": "success",
+            "total_rows": len(data),
+            "total_pcs": safe_sum(non_opening, "pcs"),
+            "total_plainpcs": safe_sum(non_opening, "plainpcs"),
+            "total_rfpcs": safe_sum(non_opening, "rfpcs"),
+            "total_balpcs": safe_sum(data, "balpcs"),
+            "from_snapshot": True,
+            "snapshot_time": snap.get("sync_time", ""),
+            "data": data
+        })
+    # === END CLOUD FALLBACK ===
+
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    inw_type = request.args.get("inw_type", "All").strip()
     try:
         data = query_job_reprocess_report(
             sql_settings,
             job_type=job_type,
             status=status_filter,
-            jobber=jobber,
-            item=item,
+            jobber=request.args.get("jobber", "").strip(),
+            item=request.args.get("item", "").strip(),
             inw_type=inw_type,
             date_from=date_from,
             date_to=date_to,
@@ -2291,7 +2441,7 @@ def api_folding_payment():
     worker_filter = request.args.get("worker", "").strip()
     status_filter = request.args.get("status", "All").strip()
     
-    # 1. Fetch Ticks status from local SQLite database
+    # 1. Fetch Ticks status from local SQLite database & cloud snapshot
     ticks_map = {}
     try:
         conn_local = get_local_sqlite_connection(local_db)
@@ -2308,19 +2458,57 @@ def api_folding_payment():
             }
             if j_item:
                 ticks_map[f"{row[0]}_{row[1]}_{j_item}_{p_type}"] = val
-            # Fallback without job_item for legacy compatibility
             if f"{row[0]}_{row[1]}_{p_type}" not in ticks_map:
                 ticks_map[f"{row[0]}_{row[1]}_{p_type}"] = val
         conn_local.close()
     except Exception as e:
         print(f"Error reading local folding payment ticks: {e}")
 
+    # Merge ticks from cloud snapshot if available
+    snap = load_cloud_snapshot()
+    if snap:
+        snap_ticks = snap.get("reports", {}).get("folding_payment_ticks", [])
+        for tick in snap_ticks:
+            ch_no = tick.get("challan_no", "")
+            w_id = tick.get("worker_id", "")
+            p_type = str(tick.get("process_type", "CHARAK")).upper().strip()
+            j_item = str(tick.get("job_item", "")).strip()
+            key1 = f"{ch_no}_{w_id}_{j_item}_{p_type}"
+            key2 = f"{ch_no}_{w_id}_{p_type}"
+            if key1 not in ticks_map and key2 not in ticks_map:
+                ticks_map[key1] = {
+                    "is_paid": bool(tick.get("is_paid", 0)),
+                    "paid_date": tick.get("paid_date", ""),
+                    "paid_by": tick.get("paid_by", ""),
+                    "done_pcs": float(tick.get("pcs", 0) or 0)
+                }
+
     # 2. Query Job Issue records from SQL Server (SELECT only)
     data = []
     workers_set = set()
     seq_counter = defaultdict(int)
     try:
-        job_data = query_job_issue_report(sql_settings, status="All", jobber=worker_filter)
+        if is_cloud_mode() or try_import_pyodbc() is None:
+            job_data = []
+            if snap:
+                all_ji = snap.get("reports", {}).get("job_issue", [])
+                for ji in all_ji:
+                    jbr = str(ji.get("jobber", "") or "").strip()
+                    if worker_filter and worker_filter.upper() not in jbr.upper():
+                        continue
+                    job_data.append({
+                        "series": ji.get("series", ""),
+                        "iss_no": ji.get("isssr", ""),
+                        "challan_no": ji.get("isssr", ""),
+                        "jobber": jbr,
+                        "jobber_id": jbr,
+                        "pcs": float(ji.get("pcs", 0) or 0),
+                        "jobitem": ji.get("itemname", ji.get("jobitem", "")),
+                        "iss_date": ji.get("date", ""),
+                        "date": ji.get("date", "")
+                    })
+        else:
+            job_data = query_job_issue_report(sql_settings, status="All", jobber=worker_filter)
         for idx, row in enumerate(job_data):
             series = str(row.get("series") or "").strip()
             raw_no = str(row.get("iss_no") or row.get("challan_no") or row.get("isssr") or f"CH-{idx+1}").strip()
