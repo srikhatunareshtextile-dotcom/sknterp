@@ -222,6 +222,9 @@ document.addEventListener("DOMContentLoaded", () => {
       loadJobReprocessReport();
     } else if (tabId === "folding-payment") {
       loadFoldingPayment();
+    } else if (tabId === "req") {
+      const btnGen = document.getElementById("btn-generate-req");
+      if (btnGen) btnGen.click();
     }
   }
 
