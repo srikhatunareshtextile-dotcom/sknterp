@@ -157,6 +157,21 @@ def try_import_pyodbc():
     except ImportError:
         return None
 
+def load_cloud_snapshot():
+    """Load latest cloud snapshot data for fallback when SQL Server is unavailable."""
+    snap_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_snapshot_latest.json")
+    if not os.path.exists(snap_file):
+        return None
+    try:
+        with open(snap_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def is_cloud_mode():
+    """Returns True if running on Render/cloud (no SQL Server available)."""
+    return os.environ.get("CLOUD_MODE", "").lower() == "true" or try_import_pyodbc() is None
+
 def _detect_best_odbc_driver(pyodbc_mod):
     if pyodbc_mod is None:
         return "ODBC Driver 17 for SQL Server"
@@ -1383,8 +1398,87 @@ def update_slip_item(item_id):
 def req_report():
     _, sql_settings = load_settings()
     pyodbc = try_import_pyodbc()
-    if pyodbc is None:
-        return jsonify({"error": "pyodbc not installed on server PC."}), 500
+
+    # === CLOUD FALLBACK: Use snapshot data when SQL Server not available ===
+    if pyodbc is None or is_cloud_mode():
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify({"error": "Cloud snapshot not available. Please sync from local server.", "cloud_mode": True}), 503
+        reports = snap.get("reports", {})
+        search_query = request.args.get("search", "").strip().upper()
+        include_opening = request.args.get("include_opening", "false").lower() == "true"
+        date_from = request.args.get("date_from", "").strip()
+        date_to = request.args.get("date_to", "").strip()
+
+        # Build group-wise aggregation from order_details
+        orders = {}
+        latest_dates = {}
+        for od in reports.get("order_details", []):
+            grp = str(od.get("group_name", "") or "").strip().upper()
+            if not grp:
+                continue
+            bal = float(od.get("bal_pcs", 0) or 0)
+            if bal > 0:
+                orders[grp] = orders.get(grp, 0) + bal
+            d_str = od.get("order_date", "")
+            if d_str and grp:
+                latest_dates[grp] = d_str  # keep last seen (sorted by snapshot)
+
+        # Build stock by group from snapshot
+        group_stock_raw = reports.get("group_stock", {})
+        stocks = {str(k).strip().upper(): float(v or 0) for k, v in group_stock_raw.items()}
+
+        # Build job_issue by group
+        job_issues = {}
+        for ji in reports.get("job_issue", []):
+            if not include_opening and ji.get("is_opening"):
+                continue
+            grp = str(ji.get("itemname", "") or "").strip().upper()
+            bal = float(ji.get("balpcs", 0) or 0)
+            if grp:
+                job_issues[grp] = job_issues.get(grp, 0) + bal
+
+        # Build reprocess by group
+        job_reproc = {}
+        for rp in reports.get("reprocess_stock", []):
+            if not include_opening and rp.get("is_opening"):
+                continue
+            grp = str(rp.get("itemname", "") or "").strip().upper()
+            bal = float(rp.get("balpcs", 0) or 0)
+            if grp:
+                job_reproc[grp] = job_reproc.get(grp, 0) + bal
+
+        result = []
+        for grp, order_val in orders.items():
+            if search_query and search_query not in grp:
+                continue
+            stock_val = stocks.get(grp, 0)
+            ji_val = job_issues.get(grp, 0)
+            jr_val = job_reproc.get(grp, 0)
+            req_val = order_val - stock_val - ji_val - jr_val
+            if req_val < 0:
+                status = "AVAILABLE"
+            elif req_val == 0:
+                status = "EXACT"
+            else:
+                status = "OUT OF STOCK"
+            result.append({
+                "group_name": grp,
+                "item_name": grp,
+                "order_pcs": int(order_val),
+                "stock_pcs": int(stock_val),
+                "job_issue_pcs": int(ji_val),
+                "job_reprocess_pcs": int(jr_val),
+                "req_pcs": int(req_val),
+                "status": status,
+                "latest_order_date": latest_dates.get(grp, ""),
+                "from_snapshot": True,
+                "snapshot_time": snap.get("sync_time", "")
+            })
+        result.sort(key=lambda x: x["group_name"])
+        return jsonify(result)
+    # === END CLOUD FALLBACK ===
+
 
     # Get query parameters
     include_opening = request.args.get("include_opening", "false").lower() == "true"
@@ -1529,8 +1623,32 @@ def req_report():
 def get_all_stock_report():
     _, sql_settings = load_settings()
     pyodbc_installed = try_import_pyodbc() is not None
-    if not pyodbc_installed:
-        return jsonify({"error": "pyodbc not installed on server PC."}), 500
+
+    # === CLOUD FALLBACK: Use snapshot when SQL Server unavailable ===
+    if not pyodbc_installed or is_cloud_mode():
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify({"error": "Cloud snapshot not available. Please sync from local server.", "cloud_mode": True}), 503
+        reports = snap.get("reports", {})
+        search_query = request.args.get("search", "").strip().upper()
+        include_opening = request.args.get("include_opening", "false").lower() == "true"
+        group_stock_raw = reports.get("group_stock", {})
+        result = []
+        for grp, stk_val in group_stock_raw.items():
+            grp_up = str(grp).strip().upper()
+            if search_query and search_query not in grp_up:
+                continue
+            result.append({
+                "group_name": grp_up,
+                "item_name": grp_up,
+                "stock_pcs": int(float(stk_val or 0)),
+                "from_snapshot": True,
+                "snapshot_time": snap.get("sync_time", "")
+            })
+        result.sort(key=lambda x: x["group_name"])
+        return jsonify(result)
+    # === END CLOUD FALLBACK ===
+
     
     include_opening = request.args.get("include_opening", "false").lower() == "true"
     search_query = request.args.get("search", "").strip().upper()
