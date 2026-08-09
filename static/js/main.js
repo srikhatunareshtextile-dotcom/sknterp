@@ -1,5 +1,26 @@
 
 // ══════════════════════════════════════════════════════════════════════════
+// STALE-DATA (CLOUD SNAPSHOT) WARNING BANNER
+// ══════════════════════════════════════════════════════════════════════════
+window.showSnapshotBanner = function(data) {
+  const existing = document.getElementById('snapshot-stale-banner');
+  if (!data || !data.from_snapshot || !data.snapshot_time) {
+    if (existing) existing.remove();
+    return;
+  }
+  const msg = `⚠️ Cloud data as of ${data.snapshot_time} (local PC sync se pehle ka data ho sakta hai — PC pe "Manual Sync" chalayein)`;
+  if (existing) {
+    existing.textContent = msg;
+    return;
+  }
+  const banner = document.createElement('div');
+  banner.id = 'snapshot-stale-banner';
+  banner.textContent = msg;
+  banner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#fff3cd;color:#7a5b00;padding:8px 12px;font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid #ffe08a;';
+  document.body.insertBefore(banner, document.body.firstChild);
+};
+
+// ══════════════════════════════════════════════════════════════════════════
 // BULLETPROOF GLOBAL TABLE VIEW & ZOOM ENGINE FOR ALL TABS
 // ══════════════════════════════════════════════════════════════════════════
 window.globalZoomStates = { as: 1.0, od: 1.0, ps: 1.0, req: 1.0, br: 1.0, oos: 1.0, ji: 1.0, jr: 1.0, fp: 1.0 };
@@ -3436,6 +3457,7 @@ function filterAndRenderAllStock() {
         if (data.status === "success") {
           allJobReprocessData = data.data || [];
           filterAndRenderJobReprocess();
+          window.showSnapshotBanner(data);
           const jrCard = document.getElementById("jr-filter-card") || document.getElementById("jobReprocessReportCard");
           if (jrCard) jrCard.classList.add("collapsed");
         } else {
@@ -4093,6 +4115,7 @@ window.loadFoldingPayment = function() {
     .then(data => {
       if (data.status === "success") {
         allFoldingPaymentData = data.data || [];
+        window.showSnapshotBanner(data);
         
         // Populate worker dropdown if empty
         const workerSelect = document.getElementById("fp-worker-filter");
