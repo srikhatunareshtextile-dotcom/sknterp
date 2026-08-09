@@ -4,7 +4,11 @@ import base64
 import sqlite3
 from io import BytesIO
 from datetime import datetime
-from PIL import Image
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 CLOUD_SYNC_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cloud_sync_config.json")
 
@@ -33,6 +37,9 @@ def save_cloud_sync_config(cfg):
 def create_base64_thumbnail(filepath, max_size=(600, 600), quality=75):
     """Generates light base64 Data URL for images to render smoothly on Cloud."""
     if not os.path.exists(filepath):
+        return None
+    if Image is None:
+        print("Pillow not installed - skipping thumbnail, image upload will still work")
         return None
     try:
         with Image.open(filepath) as img:
