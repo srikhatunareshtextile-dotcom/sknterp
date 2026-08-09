@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SKNT ERP - Login</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1F3A3F">
+  <link rel="apple-touch-icon" href="/logo.png">
+  
+  <!-- FontAwesome Icons & Google Fonts -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="/static/css/style.css?v=2.8">
+  <style>
+    body.login-body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0F2027 0%, #203A43 50%, #2C5364 100%);
+      overflow-x: hidden;
+    }
+
+    [data-theme="light"] body.login-body {
+      background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 50%, #f1f5f9 100%);
+      color: #0f172a;
+    }
+    [data-theme="light"] .login-card {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+    }
+    [data-theme="light"] .login-title {
+      color: #0f172a;
+    }
+    [data-theme="light"] .login-subtitle {
+      color: #475569;
+    }
+    [data-theme="light"] .form-group label {
+      color: #334155;
+    }
+    [data-theme="light"] .login-input {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      color: #0f172a;
+    }
+    [data-theme="light"] .login-input::placeholder {
+      color: #94a3b8;
+    }
+    [data-theme="light"] .login-input:focus ~ i.field-icon,
+    [data-theme="light"] .input-wrapper i.field-icon,
+    [data-theme="light"] .toggle-pwd {
+      color: #475569;
+    }
+
+
+    .login-container {
+      width: 100%;
+      max-width: 420px;
+      padding: 24px;
+      margin: 16px;
+    }
+
+    .login-card {
+      background: rgba(255, 255, 255, 0.07);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      padding: 36px 28px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      text-align: center;
+    }
+
+    .login-brand {
+      margin-bottom: 28px;
+    }
+
+    .login-brand-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #00C9FF 0%, #92FE9D 100%);
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      color: #0F2027;
+      margin-bottom: 14px;
+      box-shadow: 0 8px 20px rgba(0, 201, 255, 0.3);
+    }
+
+    .login-title {
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0 0 6px 0;
+      letter-spacing: 0.5px;
+      color: #FFFFFF;
+    }
+
+    .login-subtitle {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.65);
+      margin: 0;
+    }
+
+    .login-form {
+      margin-top: 24px;
+      text-align: left;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.85);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-wrapper i.field-icon {
+      position: absolute;
+      left: 14px;
+      color: rgba(255, 255, 255, 0.45);
+      font-size: 16px;
+      pointer-events: none;
+      transition: color 0.2s ease;
+    }
+
+    .login-input {
+      width: 100%;
+      padding: 13px 44px 13px 42px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      color: #FFFFFF;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.25s ease;
+      box-sizing: border-box;
+    }
+
+    .login-input::placeholder {
+      color: rgba(255, 255, 255, 0.35);
+    }
+
+    .login-input:focus {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: #00C9FF;
+      box-shadow: 0 0 12px rgba(0, 201, 255, 0.25);
+    }
+
+    .login-input:focus ~ i.field-icon {
+      color: #00C9FF;
+    }
+
+    .toggle-pwd {
+      position: absolute;
+      right: 14px;
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.45);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.2s ease;
+    }
+
+    .toggle-pwd:hover {
+      color: #FFFFFF;
+    }
+
+    .login-error {
+      display: none;
+      background: rgba(255, 75, 75, 0.18);
+      border: 1px solid rgba(255, 75, 75, 0.4);
+      border-radius: 10px;
+      padding: 12px;
+      color: #FF6B6B;
+      font-size: 13px;
+      margin-bottom: 18px;
+      text-align: center;
+      animation: shake 0.3s ease-in-out;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+
+    .btn-login {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #00C9FF 0%, #92FE9D 100%);
+      border: none;
+      border-radius: 12px;
+      color: #0F2027;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      box-shadow: 0 6px 16px rgba(0, 201, 255, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 22px rgba(0, 201, 255, 0.45);
+    }
+
+    .btn-login:active {
+      transform: translateY(0);
+    }
+
+    .login-footer {
+      margin-top: 24px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+  </style>
+</head>
+<body class="login-body">
+
+  <div class="login-container">
+    <div class="login-card">
+      
+      <div class="login-brand">
+        <div class="login-brand-icon">
+          <i class="fa-solid fa-user-shield"></i>
+        </div>
+        <h1 class="login-title">SKNT ERP Portal</h1>
+        <p class="login-subtitle">Enter User ID and Password to continue</p>
+      </div>
+
+      <div id="login-error" class="login-error">
+        <i class="fa-solid fa-triangle-exclamation"></i> <span id="error-text">Invalid User ID or Password</span>
+      </div>
+
+      <form id="login-form" class="login-form" autocomplete="off">
+        <div class="form-group">
+          <label for="username">User ID / Username</label>
+          <div class="input-wrapper">
+            <input type="text" id="username" class="login-input" placeholder="e.g. admin" required autofocus>
+            <i class="fa-solid fa-user field-icon"></i>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="password" class="login-input" placeholder="Enter password" required>
+            <i class="fa-solid fa-key field-icon"></i>
+            <button type="button" id="btn-toggle-pwd" class="toggle-pwd" tabIndex="-1">
+              <i class="fa-solid fa-eye" id="eye-icon"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" id="btn-submit" class="btn-login">
+          <span>Sign In</span>
+          <i class="fa-solid fa-right-to-bracket"></i>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        SKNT ERP Mobile System &bull; Secure Authentication
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const loginForm = document.getElementById('login-form');
+      const usernameInput = document.getElementById('username');
+      const passwordInput = document.getElementById('password');
+      const btnTogglePwd = document.getElementById('btn-toggle-pwd');
+      const eyeIcon = document.getElementById('eye-icon');
+      const loginError = document.getElementById('login-error');
+      const errorText = document.getElementById('error-text');
+      const btnSubmit = document.getElementById('btn-submit');
+
+      // Theme initialization
+      const savedTheme = localStorage.getItem('sknt_app_theme') || 'light';
+      if (savedTheme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.body.setAttribute('data-theme', 'light');
+      }
+
+      // Toggle Password Visibility
+      btnTogglePwd.addEventListener('click', () => {
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        if (type === 'text') {
+          eyeIcon.classList.remove('fa-eye');
+          eyeIcon.classList.add('fa-eye-slash');
+        } else {
+          eyeIcon.classList.remove('fa-eye-slash');
+          eyeIcon.classList.add('fa-eye');
+        }
+      });
+
+      // Handle Login Form Submission
+
+
+      loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        loginError.style.display = 'none';
+        
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value;
+
+        if (!username || !password) {
+          showError('User ID and Password are required.');
+          return;
+        }
+
+        btnSubmit.disabled = true;
+        btnSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sign In...';
+
+        try {
+          const resp = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+          });
+
+          const data = await resp.json();
+
+          if (resp.ok && data.status === 'success') {
+            window.location.href = '/';
+          } else {
+            showError(data.error || 'Invalid User ID or Password.');
+          }
+        } catch (err) {
+          showError('Network error. Please try again.');
+        } finally {
+          btnSubmit.disabled = false;
+          btnSubmit.innerHTML = '<span>Sign In</span> <i class="fa-solid fa-right-to-bracket"></i>';
+        }
+      });
+
+      function showError(msg) {
+        errorText.innerText = msg;
+        loginError.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

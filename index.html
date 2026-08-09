@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SKNT ERP Mobile</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1F3A3F">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  
+  <!-- FontAwesome Icons & Google Fonts -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- SheetJS for Excel Export -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Local Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css?v=2.7">
+</head>
+<body>
+
+  <!-- Premium Top Sticky Header -->
+  <header class="app-header">
+    <div class="header-logo">
+      <button id="btn-open-drawer" class="btn-menu"><i class="fa-solid fa-bars"></i></button>
+      <i class="fa-solid fa-file-invoice-dollar logo-icon"></i>
+      <span class="logo-title">SKNT ERP</span>
+    </div>
+    <div class="db-badges">
+      <button type="button" id="btn-theme-toggle" class="badge btn-theme-toggle" title="Toggle Light/Dark Theme">
+        <i class="fa-solid fa-sun" id="theme-icon"></i> <span id="theme-text">Light Mode</span>
+      </button>
+      <span id="badge-user" class="badge badge-user"><i class="fa-solid fa-user-circle"></i> <span id="header-user-id">User: --</span></span>
+      <span id="badge-sqlite" class="badge badge-online"><i class="fa-solid fa-database"></i> Local</span>
+      <span id="badge-sqlserver" class="badge badge-online"><i class="fa-solid fa-server"></i> Server</span>
+    </div>
+
+  </header>
+
+  <!-- Side-Drawer (Menu navigation helper) -->
+  <aside id="app-drawer" class="app-drawer">
+    <div class="drawer-header">
+      <h3>SKNT ERP Navigation</h3>
+      <button class="btn-close-drawer" id="btn-close-drawer"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <!-- Active User Profile Card -->
+    <div class="drawer-user-card" id="drawer-user-card">
+      <div class="user-card-avatar">
+        <i class="fa-solid fa-user-shield"></i>
+      </div>
+      <div class="user-card-info">
+        <div class="user-card-name" id="drawer-user-name">Loading User...</div>
+        <div class="user-card-details">
+          <span class="user-card-id" id="drawer-user-id-text">ID: --</span>
+          <span class="user-card-role-badge" id="drawer-user-role-badge">Role</span>
+        </div>
+      </div>
+      <a href="/api/logout" class="btn-drawer-logout" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></a>
+    </div>
+
+    <ul class="drawer-menu">
+      <li class="menu-item active" data-tab="home"><i class="fa-solid fa-house"></i> Home Dashboard</li>
+      <li class="menu-item" data-tab="slips"><i class="fa-solid fa-list-check"></i> Packing Slips</li>
+      <li class="menu-item" data-tab="bill-report"><i class="fa-solid fa-file-invoice-dollar"></i> Bill Report</li>
+      <li class="menu-item" data-tab="req"><i class="fa-solid fa-chart-line"></i> REQ Procurement Report</li>
+      <li class="menu-item" data-tab="oos-report"><i class="fa-solid fa-triangle-exclamation"></i> OOS Report</li>
+      <li class="menu-item" data-tab="all-stock"><i class="fa-solid fa-warehouse"></i> All Stock Report</li>
+      <li class="menu-item" data-tab="purchase-stock"><i class="fa-solid fa-cart-shopping"></i> Purchase Stock</li>
+      <li class="menu-item" data-tab="order-details"><i class="fa-solid fa-list-ol"></i> Order Details</li>
+      <li class="menu-item" data-tab="job-issue"><i class="fa-solid fa-boxes-packing"></i> Job Work Issue</li>
+      <li class="menu-item" data-tab="job-reprocess"><i class="fa-solid fa-rotate-left"></i> Job Reprocess</li>
+      <li class="menu-item" data-tab="folding-payment"><i class="fa-solid fa-square-check"></i> Folding Payment (Charak)</li>
+      <li class="menu-item" data-tab="settings"><i class="fa-solid fa-sliders"></i> System Settings</li>
+    </ul>
+  </aside>
+  <div id="drawer-overlay" class="drawer-overlay"></div>
+
+  <!-- Main View Containers -->
+  <main class="app-content">
+
+    <!-- 1. HOME DASHBOARD VIEW -->
+    <section id="view-home" class="view-section active">
+      <div class="hero-banner">
+        <h2>Sri Khatu Naresh Textile</h2>
+        <p>Integrated ERP Mobile Console</p>
+      </div>
+
+      <!-- Cloud Sync Bar -->
+      <div class="cloud-sync-bar" style="display:flex; align-items:center; justify-content:space-between; background:linear-gradient(135deg, #1e293b, #0f172a); color:#ffffff; padding:12px 18px; border-radius:10px; margin-bottom:18px; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <i class="fa-solid fa-cloud-arrow-up" style="font-size:22px; color:#38bdf8;"></i>
+          <div>
+            <div id="cloud-sync-last-time" style="font-weight:600; font-size:13px; color:#f8fafc;">Last Synced: Never</div>
+          </div>
+        </div>
+        <button type="button" id="btn-cloud-sync-now" onclick="triggerCloudSyncExport()" style="background:#0284c7; color:#ffffff; border:none; padding:8px 16px; border-radius:6px; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.2s;" title="Sync data to Cloud">
+          <i class="fa-solid fa-rotate"></i> Sync
+        </button>
+      </div>
+
+      <div class="dashboard-grid">
+        <!-- SQLite Widget -->
+        <div class="card status-card">
+          <div class="card-icon sqlite-icon"><i class="fa-solid fa-folder-open"></i></div>
+          <div class="card-info">
+            <h4 class="card-title">Packing Slips</h4>
+            <p id="stat-slips" class="card-value">Active</p>
+            <p id="stat-sqlite-path" class="card-sub">Path: Local DB</p>
+          </div>
+        </div>
+
+        <!-- SQL Server Widget -->
+        <div class="card status-card">
+          <div class="card-icon server-icon"><i class="fa-solid fa-server"></i></div>
+          <div class="card-info">
+            <h4 class="card-title">SQL Server DB</h4>
+            <p id="stat-server-status" class="card-value text-success">Connected</p>
+            <p id="stat-server-message" class="card-sub">SQL Server Online</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <h3 class="section-title">Quick Actions</h3>
+      <div class="actions-grid">
+        <button class="action-btn" id="quick-new-slip">
+          <i class="fa-solid fa-circle-plus"></i>
+          <span>New Packing Slip</span>
+        </button>
+        <button class="action-btn" id="quick-view-req">
+          <i class="fa-solid fa-chart-pie"></i>
+          <span>Procurement Report</span>
+        </button>
+        <button class="action-btn" id="quick-job-issue">
+          <i class="fa-solid fa-boxes-packing"></i>
+          <span>Job Work Issue</span>
+        </button>
+        <button class="action-btn" id="quick-job-reprocess">
+          <i class="fa-solid fa-rotate-left"></i>
+          <span>Job Reprocess</span>
+        </button>
+      </div>
+
+      <!-- WhatsApp Quick Share Widget -->
+      <h3 class="section-title" style="margin-top: 25px;"><i class="fa-brands fa-whatsapp" style="color: #25D366; margin-right: 6px;"></i> WhatsApp Quick Share</h3>
+      <div class="card whatsapp-card" style="display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 12px !important; padding: 16px; border-radius: 12px; margin-top: 10px; width: 100%;">
+        <div class="form-group" style="width: 100%;">
+          <label style="font-size: 12px; color: var(--text-sub); display: block; margin-bottom: 6px;">Receiver Mobile Number (with Country Code)</label>
+          <input type="text" id="wa-share-mobile" placeholder="e.g. 919876543210" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--bg-card-border); background: rgba(0,0,0,0.2); color: var(--text-main); font-size: 14px;">
+        </div>
+
+        <div class="form-group" style="width: 100%;">
+          <label style="font-size: 12px; color: var(--text-sub); display: block; margin-bottom: 6px;">Select Report Content to Share</label>
+          <select id="wa-share-content-type" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--bg-card-border); background: rgba(0,0,0,0.2); color: var(--text-main); font-size: 14px; outline: none; cursor: pointer;">
+            <option value="custom">Custom Text Message</option>
+            <option value="req">Latest REQ Procurement Report</option>
+            <option value="oos">Latest OOS Report</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="width: 100%;">
+          <label style="font-size: 12px; color: var(--text-sub); display: block; margin-bottom: 6px;">Message Body</label>
+          <textarea id="wa-share-message" rows="4" placeholder="Enter message text here..." style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--bg-card-border); background: rgba(0,0,0,0.2); color: var(--text-main); font-size: 13px; font-family: inherit; resize: vertical; outline: none;"></textarea>
+        </div>
+
+        <div style="display: flex; gap: 10px; width: 100%;">
+          <button class="btn btn-success btn-block" id="btn-wa-share-text" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; background: #25D366; border: none; height: 42px; border-radius: 8px; font-weight: 600; color: #fff; cursor: pointer;">
+            <i class="fa-brands fa-whatsapp"></i> Share Message
+          </button>
+          <button class="btn btn-primary" id="btn-wa-share-pdf" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 80px; height: 42px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+            <i class="fa-solid fa-file-pdf"></i> PDF
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. PACKING SLIPS LIST VIEW -->
+    <section id="view-slips" class="view-section">
+      <div class="section-header-row">
+        <h2 class="view-title">Packing Slips</h2>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel()"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        <button class="btn btn-primary" id="btn-add-slip"><i class="fa-solid fa-plus"></i> Add Slip</button>
+      </div>
+      
+      <!-- Search Filters -->
+      <div class="search-bar">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="slip-search-input" placeholder="Search by Party or Slip No...">
+      </div>
+
+      <div class="list-container" id="slips-list">
+        <!-- Rendered dynamically -->
+        <div class="loading-state">
+          <i class="fa-solid fa-circle-notch fa-spin"></i> Loading Slips...
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. SLIP DETAILS VIEW (DYNAMIC) -->
+    <section id="view-slip-detail" class="view-section">
+      <div class="detail-header">
+        <button class="btn-back" id="btn-back-to-slips"><i class="fa-chevron-left fa-solid"></i> Back</button>
+        <div class="detail-actions">
+          <button class="btn btn-primary" id="btn-print-slip" style="margin-right: 8px;"><i class="fa-solid fa-print"></i> Print</button>
+          <button class="btn btn-success" onclick="exportCurrentViewToExcel('Packing_Slip')" style="margin-right: 8px;"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="btn btn-danger" id="btn-delete-slip" style="margin-right: 8px;"><i class="fa-solid fa-trash"></i> Delete</button>
+          <button class="btn btn-success" id="btn-share-whatsapp"><i class="fa-brands fa-whatsapp"></i> Share</button>
+        </div>
+      </div>
+
+      <div class="slip-meta-card">
+        <div class="meta-row">
+          <span class="meta-label">Slip No:</span>
+          <span id="detail-slip-no" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Date:</span>
+          <span id="detail-slip-date" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Party Name:</span>
+          <span id="detail-party" class="meta-value font-bold">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Group Name:</span>
+          <span id="detail-group-name" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Haste (Broker):</span>
+          <span id="detail-haste" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">View Type:</span>
+          <span id="detail-view-type" class="meta-value badge badge-info">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Remarks:</span>
+          <span id="detail-remarks" class="meta-value italic">-</span>
+        </div>
+      </div>
+
+      <div class="items-header-row">
+        <h3>Items</h3>
+        <button class="btn btn-sm btn-primary" id="btn-add-item-modal"><i class="fa-solid fa-plus"></i> Add Item</button>
+      </div>
+
+      <div class="items-list" id="slip-items-list">
+        <!-- Rendered dynamically -->
+      </div>
+      <div class="print-only-table-container" id="slip-print-table"></div>
+    </section>
+
+    <!-- 4. REQ REPORT VIEW -->
+    <section id="view-req" class="view-section">
+      <div class="section-header-row">
+        <h1 class="view-title">📈 REQ Report</h1>
+        <div class="action-btn-group" style="display:flex; gap:8px;">
+          <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+          <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel('REQ_Report')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+        </div>
+      </div>
+
+      <!-- Report Filters -->
+      <div class="filter-card collapsible-card" id="req-filter-card">
+        <div class="card-header-toggle" onclick="toggleCardCollapse('req-filter-card')">
+          <span>Filters</span>
+          <i class="fa-solid fa-chevron-down toggle-icon"></i>
+        </div>
+        <div class="card-collapse-content">
+          <div class="form-row">
+            <div class="form-group">
+              <label>From Date</label>
+              <input type="text" id="req-date-from" placeholder="DD/MM/YYYY" value="01/04/2026">
+            </div>
+            <div class="form-group">
+              <label>To Date</label>
+              <input type="text" id="req-date-to" placeholder="DD/MM/YYYY">
+            </div>
+          </div>
+          <div class="form-group-checkbox">
+            <input type="checkbox" id="req-include-opening">
+            <label for="req-include-opening">Include Opening Bal (OpnPcs)</label>
+          </div>
+          <div class="form-group-checkbox">
+            <input type="checkbox" id="req-oos-only">
+            <label for="req-oos-only">Show Out Of Stock (OOS) Only</label>
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-generate-req"><i class="fa-solid fa-bolt"></i> Generate Report</button>
+        </div>
+      </div>
+
+      <!-- Sticky Search and Summary Wrapper -->
+      <div class="sticky-container">
+        <!-- Live Search -->
+        <div class="search-bar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="req-search-input" placeholder="Search by Group Name...">
+        </div>
+
+        <div class="report-summary-bar sticky-summary" id="report-summary-bar" style="display: none; margin-bottom: 0; align-items: center;">
+          <div>Total Groups: <span id="req-total-groups" class="font-bold">-</span></div>
+          <div>Shortages: <span id="req-total-shortages" class="font-bold text-danger">-</span></div>
+          <div style="display:flex; gap:6px; margin-left:auto;">
+            <button type="button" class="btn btn-sm btn-primary active" id="req-btn-table-mode" onclick="switchViewMode('req', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="req-btn-card-mode" onclick="switchViewMode('req', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button>
+          </div>
+        </div>
+      </div>
+
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="req-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('req', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="req-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('req', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('req', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="req-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+      <div class="list-container" id="req-report-list" style="display:none;">
+        <div class="empty-state">
+          <i class="fa-solid fa-table-list"></i>
+          <p>Tap "Generate Report" to load from database</p>
+        </div>
+      </div>
+      <div class="print-only-table-container" id="req-print-table"></div>
+    </section>
+
+    <!-- ═══ OOS REPORT VIEW ═══ -->
+    <section id="view-oos-report" class="view-section">
+      <div class="section-header-row">
+        <h1 class="view-title">⚠️ OOS Report</h1>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel()"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        <button class="btn btn-sm" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+      </div>
+
+      <!-- Report Filters -->
+      <div class="filter-card collapsible-card" id="oos-filter-card">
+        <div class="card-header-toggle" onclick="toggleCardCollapse('oos-filter-card')">
+          <span>Filters</span>
+          <i class="fa-solid fa-chevron-down toggle-icon"></i>
+        </div>
+        <div class="card-collapse-content">
+          <div class="form-row">
+            <div class="form-group">
+              <label>From Date</label>
+              <input type="text" id="oos-date-from" placeholder="DD/MM/YYYY" value="01/04/2026">
+            </div>
+            <div class="form-group">
+              <label>To Date</label>
+              <input type="text" id="oos-date-to" placeholder="DD/MM/YYYY">
+            </div>
+          </div>
+          <div class="form-group-checkbox">
+            <input type="checkbox" id="oos-include-opening">
+            <label for="oos-include-opening">Include Opening Bal (OpnPcs)</label>
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-generate-oos"><i class="fa-solid fa-bolt"></i> Generate OOS Report</button>
+        </div>
+      </div>
+
+      <!-- Sticky Search and Summary Wrapper -->
+      <div class="sticky-container">
+        <!-- Live Search -->
+        <div class="search-bar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="oos-search-input" placeholder="Search by Group Name...">
+        </div>
+
+        <div class="report-summary-bar sticky-summary" id="oos-summary-bar" style="display: none; margin-bottom: 0; align-items: center;">
+          <div>OOS Groups: <span id="oos-total-groups" class="font-bold">-</span></div>
+          <div style="display:flex; gap:6px; margin-left:auto;">
+            <button type="button" class="btn btn-sm btn-primary active" id="oos-btn-table-mode" onclick="switchViewMode('oos', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="oos-btn-card-mode" onclick="switchViewMode('oos', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button>
+          </div>
+        </div>
+      </div>
+
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="oos-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('oos', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="oos-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('oos', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('oos', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="oos-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+      <div class="list-container" id="oos-report-list" style="display:none;">
+        <div class="empty-state">
+          <i class="fa-solid fa-table-list"></i>
+          <p>Tap "Generate OOS Report" to load from database</p>
+        </div>
+      </div>
+      <div class="print-only-table-container" id="oos-print-table"></div>
+    </section>
+
+    <!-- 5. SETTINGS VIEW -->
+    <section id="view-settings" class="view-section">
+      <h2 class="view-title">System Settings</h2>
+      
+      <form id="settings-form" class="settings-form">
+        <h3>SQL Server Database</h3>
+        <div class="form-group">
+          <label>SQL Server Name</label>
+          <input type="text" id="set-db-server" placeholder="e.g. THOR\SQLEXPRESS" required>
+        </div>
+        <div class="form-group">
+          <label>Current Year Database</label>
+          <input type="text" id="set-db-name" placeholder="e.g. EQSKNT20262027" required>
+        </div>
+        <div class="form-group">
+          <label>Previous Year Database (Opening Stock Source)</label>
+          <input type="text" id="set-db-prev" placeholder="e.g. EQSKNT20252026">
+        </div>
+        <div class="form-group-checkbox">
+          <input type="checkbox" id="set-db-trusted" checked>
+          <label for="set-db-trusted">Use Windows Authentication (Trusted Connection)</label>
+        </div>
+        <div id="auth-fields" style="display: none;">
+          <div class="form-group">
+            <label>SQL Username</label>
+            <input type="text" id="set-db-user">
+          </div>
+          <div class="form-group">
+            <label>SQL Password</label>
+            <input type="password" id="set-db-password">
+          </div>
+        </div>
+
+        <h3>Local SQLite Database</h3>
+        <div class="form-group">
+          <label>LAN/Alternative Database Path</label>
+          <input type="text" id="set-lan-db-path" placeholder="Leave empty for default path">
+          <small class="form-help">If you use a shared network SQLite database, configure the path here.</small>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block"><i class="fa-solid fa-floppy-disk"></i> Save Configurations</button>
+      </form>
+    </section>
+
+    <!-- ═══ ALL STOCK REPORT VIEW ═══ -->
+    <section id="view-all-stock" class="view-section">
+      <div class="section-header-row">
+        <h1 class="view-title">🏭 All Stock Report</h1>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel()"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        <button class="btn btn-sm" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+      </div>
+      <div class="filter-card collapsible-card" id="all-stock-filter-card">
+        <div class="card-header-toggle" onclick="toggleCardCollapse('all-stock-filter-card')">
+          <span>Filters</span>
+          <i class="fa-solid fa-chevron-down toggle-icon"></i>
+        </div>
+        <div class="card-collapse-content">
+          <div class="form-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+            <div class="form-group" style="flex:1; min-width:180px;">
+              <label style="font-size:12px; font-weight:600; color:var(--text-sub);">Report View Level</label>
+              <select id="all-stock-view-type" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--bg-card-border); background:#0f172a; color:#fff; font-size:13px;">
+                <option value="group" selected>Main Group View (Summary Net)</option>
+                <option value="item">Item-Wise / Quality-Wise View (All Sub-Items)</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1; min-width:180px;">
+              <label style="font-size:12px; font-weight:600; color:var(--text-sub);">Item Category Filter</label>
+              <select id="all-stock-item-type" style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--bg-card-border); background:#0f172a; color:#fff; font-size:13px;">
+                <option value="EXCLUDE_GREY" selected>Finish & Commercial Goods (Exclude Grey)</option>
+                <option value="FINISH">Finish Goods Only</option>
+                <option value="ALL">All Items (Including Grey)</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;">
+            <div class="form-group-checkbox" style="margin-bottom:0">
+              <input type="checkbox" id="all-stock-nonzero">
+              <label for="all-stock-nonzero">Show Non-Zero Only</label>
+            </div>
+            <button class="btn btn-sm btn-primary" id="btn-load-all-stock" style="padding:6px 16px;"><i class="fa-solid fa-sync"></i> Refresh Stock Data</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky Search and Summary Wrapper -->
+      <div class="sticky-container">
+        <div class="search-bar">
+          <i class="fa-solid fa-search"></i>
+          <input type="text" id="all-stock-search" placeholder="Search group name...">
+        </div>
+        
+        <div id="all-stock-summary" style="display:none;" class="filter-card sticky-summary">
+          <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-around;align-items:center;">
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">FINISH STOCK</div><div id="as-total-fin" style="font-size:18px;font-weight:700;color:#1e70e6">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">JOB ISSUE</div><div id="as-total-ji" style="font-size:18px;font-weight:700;color:#f59e0b">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">JOB REPROCESS</div><div id="as-total-jr" style="font-size:18px;font-weight:700;color:#a855f7">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">GRAND TOTAL</div><div id="as-total-all" style="font-size:18px;font-weight:700;color:#10b981">0</div></div>
+<div style="display:flex; gap:6px; margin-left:auto;"><button type="button" class="btn btn-sm btn-primary active" id="as-btn-table-mode" onclick="switchViewMode('as', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button><button type="button" class="btn btn-sm btn-secondary" id="as-btn-card-mode" onclick="switchViewMode('as', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button></div>
+          </div>
+        </div>
+      </div>
+      
+      
+        <!-- Table Zoom Controls Toolbar -->
+        
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="as-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('as', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="as-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('as', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('as', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="as-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+      <div id="all-stock-list" class="list-container" style="display:none;"></div>
+      <div class="print-only-table-container" id="all-stock-print-table"></div>
+    </section>
+
+    <!-- ═══ ORDER DETAILS VIEW ═══ -->
+    <section id="view-order-details" class="view-section">
+      <div class="section-header-row">
+        <h1 class="view-title">📋 Order Details</h1>
+        <div class="action-btn-group" style="display:flex; gap:8px;">
+          <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+          <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel('Order_Details')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+          <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+        </div>
+      </div>
+      <div class="filter-card collapsible-card" id="od-filter-card">
+        <div class="card-header-toggle" onclick="toggleCardCollapse('od-filter-card')">
+          <span>Filters</span>
+          <i class="fa-solid fa-chevron-down toggle-icon"></i>
+        </div>
+        <div class="card-collapse-content">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Status</label>
+              <select id="od-status">
+                <option value="all">All</option>
+                <option value="pending" selected>Pending</option>
+                <option value="close">Closed</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Sort By</label>
+              <select id="od-sort">
+                <option value="party">Partywise</option>
+                <option value="group">Groupwise</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Party</label>
+              <select id="od-party">
+                <option value="">All Parties</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Group</label>
+              <select id="od-group">
+                <option value="">All Groups</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Haste (Broker)</label>
+              <select id="od-haste">
+                <option value="">All Haste</option>
+              </select>
+            </div>
+            <div class="form-group" style="display:flex; align-items:flex-end; gap: 15px; flex-wrap: wrap;">
+              <div class="form-group-checkbox" style="margin-bottom: 8px;">
+                <input type="checkbox" id="od-include-opening">
+                <label for="od-include-opening">Include Previous Year</label>
+              </div>
+              <div class="form-group-checkbox" style="margin-bottom: 8px;">
+                <input type="checkbox" id="od-oos-only">
+                <label for="od-oos-only">Show OOS Only</label>
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-load-orders" style="margin-top:8px"><i class="fa-solid fa-sync"></i> Load Order Details</button>
+        </div>
+      </div>
+
+      <!-- Sticky Search and Summary Wrapper -->
+      <div class="sticky-container">
+        <div class="search-bar">
+          <i class="fa-solid fa-search"></i>
+          <input type="text" id="od-search" placeholder="Search in results...">
+        </div>
+        
+        <div id="od-summary" style="display:none;" class="filter-card sticky-summary">
+          <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-around;">
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL ORDERS</div><div id="od-total-orders" style="font-size:18px;font-weight:700;color:#1e70e6">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">ORDER PCS</div><div id="od-total-pcs" style="font-size:18px;font-weight:700;color:#f59e0b">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">BALANCE PCS</div><div id="od-total-bal" style="font-size:18px;font-weight:700;color:#ef4444">0</div></div>
+<div style="display:flex; gap:6px; margin-left:auto;"><button type="button" class="btn btn-sm btn-primary active" id="od-btn-table-mode" onclick="switchViewMode('od', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button><button type="button" class="btn btn-sm btn-secondary" id="od-btn-card-mode" onclick="switchViewMode('od', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button></div>
+          </div>
+        </div>
+      </div>
+      
+      
+        <!-- Table Zoom Controls Toolbar -->
+        
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="od-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('od', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="od-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('od', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('od', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="od-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+      <div id="od-list" class="list-container" style="display:none;"></div>
+      <div class="print-only-table-container" id="od-print-table"></div>
+    </section>
+
+    <!-- 8. PURCHASE STOCK REPORT VIEW -->
+    <section id="view-purchase-stock" class="view-section">
+      <div class="section-header-row">
+        <h1 class="view-title">🛒 Purchase Stock Report</h1>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel()"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        <button class="btn btn-sm" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+      </div>
+      <div class="filter-card collapsible-card" id="ps-filter-card">
+        <div class="card-header-toggle" onclick="toggleCardCollapse('ps-filter-card')">
+          <span>Filters</span>
+          <i class="fa-solid fa-chevron-down toggle-icon"></i>
+        </div>
+        <div class="card-collapse-content">
+          <!-- Date Range -->
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+            <label style="font-size:12px;font-weight:600;color:var(--text-sub);min-width:50px;">From:</label>
+            <input type="text" id="ps-date-from" placeholder="DD/MM/YYYY" class="date-mask" class="form-input" style="flex:1;min-width:100px;max-width:140px;font-size:13px;padding:6px 8px;">
+            <label style="font-size:12px;font-weight:600;color:var(--text-sub);min-width:30px;">To:</label>
+            <input type="text" id="ps-date-to" placeholder="DD/MM/YYYY" class="date-mask" class="form-input" style="flex:1;min-width:100px;max-width:140px;font-size:13px;padding:6px 8px;">
+          </div>
+          <!-- Status Radio + Checkboxes -->
+          <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+            <span style="font-size:12px;font-weight:600;color:var(--text-sub);">Status:</span>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="radio" name="ps-status" value="pending" checked> Pending
+            </label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="radio" name="ps-status" value="closed"> Closed
+            </label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="radio" name="ps-status" value="all"> All
+            </label>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+            <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+              <div class="form-group-checkbox" style="margin-bottom:0">
+                <input type="checkbox" id="ps-include-opening" checked>
+                <label for="ps-include-opening">Include Opening</label>
+              </div>
+              <div class="form-group-checkbox" style="margin-bottom:0">
+                <input type="checkbox" id="ps-show-rec-plain-pcs">
+                <label for="ps-show-rec-plain-pcs">Show Rec Challan Plain Pcs</label>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-primary" id="btn-load-pur-stock"><i class="fa-solid fa-sync"></i> Load</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky Search and Summary -->
+      <div class="sticky-container">
+        <div class="search-bar">
+          <i class="fa-solid fa-search"></i>
+          <input type="text" id="pur-stock-search" placeholder="Search party or item name...">
+        </div>
+
+        <div id="pur-stock-summary" style="display:none;" class="filter-card sticky-summary">
+          <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-around;">
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">PARTIES</div><div id="ps-total-parties" style="font-size:18px;font-weight:700;color:#8b5cf6">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">ENTRIES</div><div id="ps-total-items" style="font-size:18px;font-weight:700;color:#1e70e6">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL PCS</div><div id="ps-total-pcs" style="font-size:18px;font-weight:700;color:#10b981">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL BAL</div><div id="ps-total-bal" style="font-size:18px;font-weight:700;color:#f59e0b">0</div></div>
+<div style="display:flex; gap:6px; margin-left:auto;"><button type="button" class="btn btn-sm btn-primary active" id="ps-btn-table-mode" onclick="switchViewMode('ps', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button><button type="button" class="btn btn-sm btn-secondary" id="ps-btn-card-mode" onclick="switchViewMode('ps', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button></div>
+          </div>
+        </div>
+      </div>
+
+      
+        <!-- Table Zoom Controls Toolbar -->
+        
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="ps-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('ps', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="ps-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('ps', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('ps', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="ps-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+      <div id="pur-stock-list" class="list-container" style="display:none;"></div>
+      <div class="print-only-table-container" id="pur-stock-print-table"></div>
+    </section>
+
+    <!-- 9. SALE BILL REPORT VIEW -->
+    <section id="view-bill-report" class="view-section">
+        <div class="section-header-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <h1 class="view-title">📄 Sale Bill Report</h1>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel('Bill_Report')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        </div>
+
+        <div class="filter-card collapsible-card" id="br-filter-card">
+          <div class="card-header-toggle" onclick="toggleCardCollapse('br-filter-card')">
+            <span class="card-title"><i class="fa-solid fa-filter"></i> Bill Report Filters</span>
+            <i class="fa-solid fa-chevron-down toggle-icon"></i>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Date From</label>
+                <input type="text" id="br-date-from" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+              <div class="form-group">
+                <label>Date To</label>
+                <input type="text" id="br-date-to" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>View / Group Pattern</label>
+                <select id="br-sort-by">
+                  <option value="date" selected>Date Wise (Default)</option>
+                  <option value="party">Party Wise Grouping</option>
+                  <option value="group">Group Wise (Main Item)</option>
+                  <option value="item">Item Wise Grouping</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Party Name</label>
+                <input type="text" id="br-party" list="br-parties-datalist" placeholder="All Parties (select or enter name)">
+                <datalist id="br-parties-datalist"></datalist>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Group Name (Main Item)</label>
+                <input type="text" id="br-group" list="br-groups-datalist" placeholder="All Groups (select or enter name)">
+                <datalist id="br-groups-datalist"></datalist>
+              </div>
+              <div class="form-group" style="display:flex; align-items:flex-end;">
+                <div class="form-group-checkbox" style="margin-bottom: 8px;">
+                  <input type="checkbox" id="br-see-old-year">
+                  <label for="br-see-old-year">See Old Year (Include Previous Year Data)</label>
+                </div>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-load-bill-report" style="margin-top:8px"><i class="fa-solid fa-bolt"></i> Generate Bill Report</button>
+          </div>
+        </div>
+
+        <!-- Sticky Search and Summary -->
+        <div class="sticky-container">
+          <div class="search-bar">
+            <i class="fa-solid fa-search"></i>
+            <input type="text" id="br-search" placeholder="Search bill no, party, or item...">
+          </div>
+
+          <div id="br-summary" style="display:none;" class="filter-card sticky-summary">
+            <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-around;align-items:center;">
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL BILLS</div><div id="br-total-bills" style="font-size:18px;font-weight:700;color:#1e70e6">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL ENTRIES</div><div id="br-total-entries" style="font-size:18px;font-weight:700;color:#3b82f6">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL PCS</div><div id="br-total-pcs" style="font-size:18px;font-weight:700;color:#f59e0b">0</div></div>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-sm btn-primary active" id="br-btn-table-mode" onclick="switchViewMode('br', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="br-btn-card-mode" onclick="switchViewMode('br', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table Zoom Controls Toolbar -->
+        
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="br-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('br', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="br-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('br', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('br', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="br-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+        <div id="br-list" class="br-card-container" style="display:none;"></div>
+        <div class="print-only-table-container" id="br-print-table" style="display:none;"></div>
+      </section>
+
+    <!-- 10. JOB WORK ISSUE VIEW -->
+    <section id="view-job-issue" class="view-section">
+        <div class="section-header-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <h1 class="view-title">🛠️ Job Work Issue</h1>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel('Job_Work_Issue')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        </div>
+
+        <div class="filter-card collapsible-card" id="ji-filter-card">
+          <div class="card-header-toggle" onclick="toggleCardCollapse('ji-filter-card')">
+            <span class="card-title"><i class="fa-solid fa-filter"></i> Job Work Issue Filters</span>
+            <i class="fa-solid fa-chevron-down toggle-icon"></i>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Date From</label>
+                <input type="text" id="ji-date-from" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+              <div class="form-group">
+                <label>Date To</label>
+                <input type="text" id="ji-date-to" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+              <div class="form-group">
+                <label>Rec Up To</label>
+                <input type="text" id="ji-rec-upto" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Jobber / Party Name</label>
+                <input type="text" id="ji-jobber" placeholder="Search Jobber name..." list="ji-jobbers-list" autocomplete="off">
+                <datalist id="ji-jobbers-list"></datalist>
+              </div>
+              <div class="form-group">
+                <label>Job Item / Fabric</label>
+                <input type="text" id="ji-item" placeholder="Search Item or Fabric..." list="ji-items-list" autocomplete="off">
+                <datalist id="ji-items-list"></datalist>
+              </div>
+              <div class="form-group">
+                <label>Inward Type</label>
+                <select id="ji-inw-type" style="padding:8px 12px; border-radius:8px; border:1px solid var(--bg-card-border); background:var(--bg-card); color:var(--text-main); font-weight:600;">
+                  <option value="All" selected>All Inward Types</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label style="font-weight:700; color:var(--primary-color, #2563eb);"><i class="fa-solid fa-layer-group"></i> Group Pattern</label>
+                <select id="ji-group-pattern" onchange="filterAndRenderJobIssue()" style="padding:8px 12px; border-radius:8px; border:1px solid var(--bg-card-border); background:var(--bg-card); color:var(--text-main); font-weight:700;">
+                  <option value="None" selected>None (Detailed Table)</option>
+                  <option value="LotNo">Lot No</option>
+                  <option value="InwType">Inward Type / Book</option>
+                  <option value="Agent">Agent</option>
+                  <option value="ItemName">Item Name</option>
+                  <option value="JobItem">JobItem</option>
+                  <option value="Series">Series / Design</option>
+                  <option value="Jobber">Jobber / Party</option>
+                  <option value="Fabrics">Fabrics / Group</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+                <label style="font-weight:700; margin-bottom:0; min-width:110px;">Pending / Close:</label>
+                <div style="display:flex; gap:16px; align-items:center;">
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="ji_status" value="Pending" checked> Pending</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="ji_status" value="Close"> Close</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="ji_status" value="All"> All</label>
+                </div>
+              </div>
+              <div class="form-group" style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:700; color:var(--text-main); margin-bottom:0;">
+                  <input type="checkbox" id="ji-include-opening" style="width:18px; height:18px; cursor:pointer;">
+                  <span>Include Opening Stock</span>
+                </label>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-load-job-issue" style="margin-top:12px"><i class="fa-solid fa-bolt"></i> Load Job Work Issue Report</button>
+          </div>
+        </div>
+
+        <!-- Sticky Search and Summary -->
+        <div class="sticky-container">
+          <div class="search-bar">
+            <i class="fa-solid fa-search"></i>
+            <input type="text" id="ji-search" placeholder="Filter by jobber, item, serial, bill no...">
+          </div>
+
+          <div id="ji-summary" style="display:none;" class="filter-card sticky-summary">
+            <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:space-around;align-items:center;">
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">ENTRIES</div><div id="ji-total-rows" style="font-size:16px;font-weight:700;color:#1e70e6">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL PCS</div><div id="ji-total-pcs" style="font-size:16px;font-weight:700;color:#3b82f6">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">REC PCS</div><div id="ji-total-recpcs" style="font-size:16px;font-weight:700;color:#10b981">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">BAL PCS</div><div id="ji-total-balpcs" style="font-size:16px;font-weight:700;color:#ef4444">0</div></div>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-sm btn-primary active" id="ji-btn-table-mode" onclick="switchViewMode('ji', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="ji-btn-card-mode" onclick="switchViewMode('ji', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="ji-btn-summary-mode" onclick="switchViewMode('ji', 'summary')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-users"></i> Party Summary</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="ji-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('ji', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="ji-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('ji', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('ji', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="ji-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+        <div id="ji-list" class="br-card-container" style="display:none;"></div>
+        <div id="ji-summary-wrapper" class="br-report-table-wrapper" style="display:none; margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+        <div class="print-only-table-container" id="ji-print-table" style="display:none;"></div>
+    </section>
+
+    <!-- 11. JOB REPROCESS VIEW -->
+    <section id="view-job-reprocess" class="view-section">
+        <div class="section-header-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <h1 class="view-title">🔄 Job Reprocess</h1>
+          <div class="action-btn-group" style="display:flex; gap:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="printCurrentView()"><i class="fa-solid fa-print"></i> Print</button>
+            <button class="btn btn-sm btn-success" onclick="exportCurrentViewToExcel('Job_Reprocess')"><i class="fa-solid fa-file-excel"></i> Excel</button>
+            <button class="btn btn-sm btn-whatsapp" onclick="shareCurrentViewToWhatsApp()"><i class="fa-brands fa-whatsapp"></i> WhatsApp</button>
+          </div>
+        </div>
+
+        <div class="filter-card collapsible-card" id="jr-filter-card">
+          <div class="card-header-toggle" onclick="toggleCardCollapse('jr-filter-card')">
+            <span class="card-title"><i class="fa-solid fa-filter"></i> Job Reprocess Filters</span>
+            <i class="fa-solid fa-chevron-down toggle-icon"></i>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Date From</label>
+                <input type="text" id="jr-date-from" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+              <div class="form-group">
+                <label>Date To</label>
+                <input type="text" id="jr-date-to" class="date-mask" placeholder="DD/MM/YYYY">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Jobber / Party Name</label>
+                <input type="text" id="jr-jobber" placeholder="Search Jobber name..." list="jr-jobbers-list" autocomplete="off">
+                <datalist id="jr-jobbers-list"></datalist>
+              </div>
+              <div class="form-group">
+                <label>Job Item</label>
+                <input type="text" id="jr-item" placeholder="Search Job Item..." list="jr-items-list" autocomplete="off">
+                <datalist id="jr-items-list"></datalist>
+              </div>
+              <div class="form-group">
+                <label>Inward Type</label>
+                <select id="jr-inw-type" style="padding:8px 12px; border-radius:8px; border:1px solid var(--bg-card-border); background:var(--bg-card); color:var(--text-main); font-weight:600;">
+                  <option value="All" selected>All Inward Types</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label style="font-weight:700; color:var(--primary-color, #2563eb);"><i class="fa-solid fa-layer-group"></i> Group Pattern</label>
+                <select id="jr-group-pattern" onchange="filterAndRenderJobReprocess()" style="padding:8px 12px; border-radius:8px; border:1px solid var(--bg-card-border); background:var(--bg-card); color:var(--text-main); font-weight:700;">
+                  <option value="None" selected>None (Detailed Table)</option>
+                  <option value="Jobber">Jobber / Party</option>
+                  <option value="JobItem">JobItem</option>
+                  <option value="Agent">Agent</option>
+                  <option value="LotNo">Lot No</option>
+                  <option value="Series">Series</option>
+                  <option value="InwType">Inward Type</option>
+                  <option value="JobType">Job Type</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row" style="align-items:flex-start;">
+              <div class="form-group" style="flex:2;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label style="font-weight:700; margin-bottom:0;">JobType Filter (Multi-Select):</label>
+                  <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" onclick="toggleAllJobTypes(true)" style="font-size:11px; font-weight:700;">Select All</button>
+                </div>
+                <div id="jr-jobtype-checkboxes" style="display:flex; flex-wrap:wrap; gap:8px; padding:8px 12px; background:var(--bg-card); border-radius:8px; border:1px solid var(--bg-card-border);">
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="DEMAGE"> DEMAGE</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="JOB" checked> JOB</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="LACE"> LACE</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="RETURN"> RETURN</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="RF"> RF</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="SECOND"> SECOND</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:12px; font-weight:600; color:var(--text-main);"><input type="checkbox" class="jr-jt-cb" value="SHT"> SHT</label>
+                </div>
+              </div>
+              <div class="form-group" style="display:flex; flex-direction:column; gap:10px; flex:1;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <label style="font-weight:700; margin-bottom:0; min-width:110px;">Pending / Close:</label>
+                  <div style="display:flex; gap:16px; align-items:center;">
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="Pending"> Pending</label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="Close"> Close</label>
+                    <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="All" checked> All</label>
+                  </div>
+                </div>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:700; color:var(--text-main); margin-bottom:0;">
+                  <input type="checkbox" id="jr-include-opening" style="width:18px; height:18px; cursor:pointer;">
+                  <span>Include Opening Stock</span>
+                </label>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="btn-load-job-reprocess" style="margin-top:12px"><i class="fa-solid fa-bolt"></i> Load Job Reprocess Report</button>
+          </div>
+        </div>
+
+        <!-- Sticky Search and Summary -->
+        <div class="sticky-container">
+          <div class="search-bar">
+            <i class="fa-solid fa-search"></i>
+            <input type="text" id="jr-search" placeholder="Filter by jobber, item, iss no, rec sr...">
+          </div>
+
+          <div id="jr-summary" style="display:none;" class="filter-card sticky-summary">
+            <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:space-around;align-items:center;">
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">ENTRIES</div><div id="jr-total-rows" style="font-size:16px;font-weight:700;color:#1e70e6">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">TOTAL PCS</div><div id="jr-total-pcs" style="font-size:16px;font-weight:700;color:#3b82f6">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">RF PCS</div><div id="jr-total-rfpcs" style="font-size:16px;font-weight:700;color:#10b981">0</div></div>
+              <div style="text-align:center"><div style="font-size:10px;color:var(--text-sub)">BAL PCS</div><div id="jr-total-balpcs" style="font-size:16px;font-weight:700;color:#ef4444">0</div></div>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-sm btn-primary active" id="jr-btn-table-mode" onclick="switchViewMode('jr', 'table')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-table"></i> Table View</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="jr-btn-card-mode" onclick="switchViewMode('jr', 'card')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-id-card"></i> Cards</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="jr-btn-summary-mode" onclick="switchViewMode('jr', 'summary')" style="font-size:11px; padding:4px 10px;"><i class="fa-solid fa-users"></i> Party Summary</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Table Zoom Controls Toolbar -->
+        <div id="jr-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+          <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('jr', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+            <span id="jr-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('jr', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('jr', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+          </div>
+        </div>
+        <div id="jr-table-wrapper" class="br-report-table-wrapper" style="margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+        <div id="jr-list" class="br-card-container" style="display:none;"></div>
+        <div id="jr-summary-wrapper" class="br-report-table-wrapper" style="display:none; margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;"></div>
+        <div class="print-only-table-container" id="jr-print-table" style="display:none;"></div>
+    </section>
+
+    <!-- 11. FOLDING PAYMENT VIEW (CHARAK) -->
+    <section id="view-folding-payment" class="view-section">
+      <div class="filter-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border-bottom: 2px solid var(--bg-card-border); padding-bottom: 12px; margin-bottom: 16px;">
+          <div>
+            <h2 style="margin:0; font-size:1.4rem; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-square-check" style="color:#10b981;"></i> Folding Payment (Charak)
+            </h2>
+            <p style="margin:4px 0 0 0; font-size:12px; color:var(--text-sub);">
+              Maal checking & folding worker payment verification & duplicate prevention
+            </p>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <span class="badge badge-online" style="background:#2e7d32; color:#fff; font-size:12px; padding:6px 12px;">
+              <i class="fa-solid fa-shield-halved"></i> Duplicate Payment Guard Active
+            </span>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+          <div class="form-group" style="flex:1; min-width:180px;">
+            <label for="fp-worker-filter" style="font-weight:600;"><i class="fa-solid fa-user"></i> Select Worker / Jobber:</label>
+            <select id="fp-worker-filter" class="form-control">
+              <option value="">-- All Workers --</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1; min-width:140px;">
+            <label for="fp-status-filter" style="font-weight:600;"><i class="fa-solid fa-filter"></i> Payment Status:</label>
+            <select id="fp-status-filter" class="form-control">
+              <option value="All">All Challans</option>
+              <option value="Unpaid" selected>Unpaid (Pending Tick)</option>
+              <option value="Paid">Paid (Tick Confirmed)</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-primary" id="btn-load-folding-payment"><i class="fa-solid fa-rotate"></i> Refresh List</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search & Summary Bar -->
+      <div class="sticky-container">
+        <div class="search-bar">
+          <i class="fa-solid fa-search"></i>
+          <input type="text" id="fp-search" placeholder="Filter by challan no, worker name, item...">
+        </div>
+
+        <div id="fp-summary" class="filter-card sticky-summary">
+          <div style="display:flex; flex-wrap:wrap; gap:14px; justify-content:space-around; align-items:center;">
+            <div style="text-align:center"><div style="font-size:10px; color:var(--text-sub)">TOTAL CHALLANS</div><div id="fp-total-count" style="font-size:16px; font-weight:700; color:#1e70e6">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px; color:var(--text-sub)">TOTAL PCS</div><div id="fp-total-pcs" style="font-size:16px; font-weight:700; color:#3b82f6">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px; color:var(--text-sub)">CHECKING PAID PCS</div><div id="fp-checking-pcs" style="font-size:16px; font-weight:700; color:#10b981">0</div></div>
+            <div style="text-align:center"><div style="font-size:10px; color:var(--text-sub)">CHARAK PAID PCS</div><div id="fp-charak-pcs" style="font-size:16px; font-weight:700; color:#059669">0</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table Zoom Controls Toolbar -->
+      <div id="fp-zoom-toolbar" style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; color:#fff; padding:8px 14px; border-radius:10px 10px 0 0; margin-top:12px; border:1px solid #334155;">
+        <div style="font-size:12px; font-weight:600; display:flex; align-items:center; gap:6px;">
+          <i class="fa-solid fa-magnifying-glass-plus" style="color:#60a5fa;"></i> Table Zoom Controls
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('fp', -0.15)" title="Zoom Out (-)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-minus"></i> Zoom Out</button>
+          <span id="fp-zoom-level" class="badge badge-info" style="font-size:12px; font-weight:700; background:#3b82f6; padding:4px 10px;">100%</span>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('fp', 0.15)" title="Zoom In (+)" style="padding:4px 10px; font-size:12px;"><i class="fa-solid fa-plus"></i> Zoom In</button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="zoomTable('fp', 0)" title="Reset (100%)" style="padding:4px 8px; font-size:11px;"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+        </div>
+      </div>
+      <div id="fp-table-wrapper" class="br-report-table-wrapper" style="margin-top:0; border-top-left-radius:0; border-top-right-radius:0;"></div>
+    </section>
+
+    <!-- 12. SYSTEM SETTINGS & USER MANAGEMENT VIEW -->
+    <section id="view-settings" class="view-section">
+      <div class="hero-banner">
+        <h2>System & User Settings</h2>
+        <p>User Account Security & Admin Management</p>
+      </div>
+
+      <!-- Card 1: Change Password (For All Users) -->
+      <div class="card" style="margin-bottom: 20px; max-width: 500px;">
+        <div class="card-header" style="display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--bg-card-border); padding-bottom:12px; margin-bottom:15px;">
+          <i class="fa-solid fa-key" style="font-size:20px; color:#00c9ff;"></i>
+          <h3 style="margin:0; font-size:16px;">Change My Password</h3>
+        </div>
+        <form id="form-change-my-password">
+          <div class="form-group" style="margin-bottom:12px;">
+            <label>Current Password *</label>
+            <input type="password" id="my-old-password" class="form-control" placeholder="Enter current password" required>
+          </div>
+          <div class="form-group" style="margin-bottom:15px;">
+            <label>New Password *</label>
+            <input type="password" id="my-new-password" class="form-control" placeholder="Enter new password" required>
+          </div>
+          <button type="submit" class="btn btn-primary" id="btn-save-my-password"><i class="fa-solid fa-check"></i> Update Password</button>
+        </form>
+      </div>
+
+      <!-- Card 2: User Management & Activity Log (Admin Only) -->
+      <div class="card" id="card-admin-user-mgmt" style="display:none;">
+        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--bg-card-border); padding-bottom:12px; margin-bottom:15px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <i class="fa-solid fa-users-gear" style="font-size:20px; color:#10b981;"></i>
+            <h3 style="margin:0; font-size:16px;">User Management & Activity Log (Admin Only)</h3>
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" id="btn-open-add-user-modal"><i class="fa-solid fa-user-plus"></i> Add New User</button>
+        </div>
+
+        <div id="users-table-container" style="overflow-x:auto;">
+          <table class="report-table" style="width:100%;">
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Last Activity / Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-table-body">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Live User Activity & Action Log -->
+        <div style="margin-top:25px; border-top:1px solid var(--bg-card-border); padding-top:15px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <i class="fa-solid fa-clock-rotate-left" style="font-size:18px; color:#38bdf8;"></i>
+              <h4 style="margin:0; font-size:15px; color:var(--text-main);">Live User Activity & Action Log</h4>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="loadActivityLogs()" style="font-size:12px; padding:4px 10px;">
+              <i class="fa-solid fa-rotate"></i> Refresh Logs
+            </button>
+          </div>
+
+          <div id="activity-log-table-container" style="overflow-x:auto; max-height:350px; overflow-y:auto;">
+            <table class="report-table" style="width:100%; font-size:12px;">
+              <thead>
+                <tr>
+                  <th style="width:150px;">Time</th>
+                  <th>User</th>
+                  <th>Module</th>
+                  <th>Action</th>
+                  <th>Activity Details</th>
+                </tr>
+              </thead>
+              <tbody id="activity-log-table-body">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    </main>
+
+  <!-- Challan Detail Modal -->
+  <div id="challan-detail-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content" style="max-width:600px; width:90%; background:var(--bg-card); color:var(--text-main); border-radius:12px; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.3); border:1px solid var(--bg-card-border); margin:50px auto; position:relative;">
+      <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--bg-card-border); padding-bottom:10px;">
+        <h3 id="modal-challan-title" style="margin:0; font-size:16px; color:var(--text-main); font-weight:700;"><i class="fa-solid fa-circle-info" style="color:#3b82f6;"></i> Challan Details</h3>
+        <button class="btn-close-modal" onclick="closeChallanModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--text-sub);">&times;</button>
+      </div>
+      <div id="modal-challan-body" class="modal-body" style="padding-top:15px; font-size:13px; color:var(--text-main);">
+      </div>
+    </div>
+  </div>
+
+  <!-- Premium Bottom Navigation Bar -->
+  <nav class="app-nav">
+    <button class="nav-item active" data-tab="home">
+      <i class="fa-solid fa-house"></i>
+      <span>Home</span>
+    </button>
+    <button class="nav-item" data-tab="slips">
+      <i class="fa-solid fa-list-check"></i>
+      <span>Slips</span>
+    </button>
+    <button class="nav-item" data-tab="bill-report">
+      <i class="fa-solid fa-file-invoice-dollar"></i>
+      <span>Bills</span>
+    </button>
+    <button class="nav-item" data-tab="req">
+      <i class="fa-solid fa-chart-line"></i>
+      <span>REQ</span>
+    </button>
+    <button class="nav-item" data-tab="oos-report">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span>OOS</span>
+    </button>
+    <button class="nav-item" data-tab="all-stock">
+      <i class="fa-solid fa-warehouse"></i>
+      <span>All Stock</span>
+    </button>
+    <button class="nav-item" data-tab="order-details">
+      <i class="fa-solid fa-list-ol"></i>
+      <span>Orders</span>
+    </button>
+    <button class="nav-item" data-tab="purchase-stock">
+      <i class="fa-solid fa-cart-shopping"></i>
+      <span>Purchase</span>
+    </button>
+    <button class="nav-item" data-tab="job-issue">
+      <i class="fa-solid fa-boxes-packing"></i>
+      <span>Job Issue</span>
+    </button>
+    <button class="nav-item" data-tab="job-reprocess">
+      <i class="fa-solid fa-rotate-left"></i>
+      <span>Reprocess</span>
+    </button>
+    <button class="nav-item" data-tab="folding-payment">
+      <i class="fa-solid fa-square-check"></i>
+      <span>Charak/Check</span>
+    </button>
+  </nav>
+
+  <!-- MODAL: ADD PACKING SLIP -->
+  <div id="modal-add-slip" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Create Packing Slip</h3>
+        <button class="modal-close" id="modal-add-slip-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-add-slip">
+        <div class="form-group">
+          <label>Party Name *</label>
+          <input type="text" id="slip-party" list="parties-datalist" placeholder="Select or Enter Party Name" required>
+          <datalist id="parties-datalist"></datalist>
+        </div>
+        <div class="form-group">
+          <label>Slip Date</label>
+          <input type="text" id="slip-date" placeholder="DD/MM/YYYY">
+        </div>
+        <div class="form-group">
+          <label>Slip No / Invoice No</label>
+          <input type="text" id="slip-no" placeholder="Enter Slip No (Optional)">
+        </div>
+        
+        <div class="form-group">
+          <label>Slip Selection Type</label>
+          <div class="segmented-control" id="slip-type-toggle">
+            <input type="radio" name="slip_type" id="slip-type-party" value="party" checked>
+            <label for="slip-type-party">Partywise</label>
+            <input type="radio" name="slip_type" id="slip-type-group" value="group">
+            <label for="slip-type-group">Groupwise</label>
+          </div>
+        </div>
+        
+        <div class="form-group" id="slip-group-container" style="display: none;">
+          <label>Group Name *</label>
+          <select id="slip-group">
+            <option value="">Select Group</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Haste (Agent/Broker)</label>
+          <select id="slip-haste">
+            <option value="">Select Haste (Optional)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Remarks</label>
+          <textarea id="slip-remarks" rows="2" placeholder="Any comments..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Create Slip</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD SLIP ITEM -->
+  <div id="modal-add-item" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Add Item</h3>
+        <button class="modal-close" id="modal-add-item-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      
+      <!-- Modal Tabs -->
+      <div class="modal-tabs" style="display: none !important; border-bottom: 1px solid var(--bg-card-border); margin-bottom: 15px;">
+        <button type="button" class="modal-tab-btn active" id="tab-btn-select-items" style="flex: 1; padding: 10px; background: none; border: none; border-bottom: 2px solid var(--primary); color: var(--text-main); font-weight: 600; cursor: pointer; outline: none; font-size: 13px;">Select from Orders</button>
+        <button type="button" class="modal-tab-btn" id="tab-btn-manual-item" style="flex: 1; padding: 10px; background: none; border: none; color: var(--text-sub); font-weight: 500; cursor: pointer; outline: none; font-size: 13px;">Manual Entry</button>
+      </div>
+
+      <!-- Tab Content 1: Select Items list -->
+      <div id="modal-select-items-container">
+        <div id="modal-pending-items-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; max-height: 45vh; overflow-y: auto; padding-right: 5px;">
+          <div class="loading-state">
+            <i class="fa-solid fa-circle-notch fa-spin"></i> Loading pending orders...
+          </div>
+        </div>
+        <button type="button" class="btn btn-primary btn-block" id="btn-add-selected-items">Add Selected Items</button>
+      </div>
+
+      <!-- Tab Content 2: Manual Form -->
+      <form id="form-add-item" style="display: none;">
+        <div class="form-group">
+          <label>Item Name *</label>
+          <input type="text" id="item-name" placeholder="Enter Item Name" required>
+        </div>
+        <div class="form-group">
+          <label>Order No</label>
+          <input type="text" id="item-order-no" placeholder="Optional">
+        </div>
+        <div class="form-group">
+          <label>Order Date</label>
+          <input type="text" id="item-order-date" placeholder="DD/MM/YYYY (Optional)">
+        </div>
+        <div class="form-group">
+          <label>Group Name</label>
+          <input type="text" id="item-group" placeholder="Optional">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Order Pcs</label>
+            <input type="number" id="item-order-pcs" step="any" value="0">
+          </div>
+          <div class="form-group">
+            <label>Stock Pcs</label>
+            <input type="number" id="item-stock-pcs" step="any" value="0">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Bal Pcs</label>
+            <input type="number" id="item-bal-pcs" step="any" value="0">
+          </div>
+          <div class="form-group">
+            <label>Pack Pcs</label>
+            <input type="number" id="item-pack-pcs" step="any" value="0">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label>Pack Type</label>
+          <select id="item-pack-type">
+            <!-- Rendered dynamically -->
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Add Item</button>
+      </form>
+    </div>
+  </div>
+  <!-- MODAL: EDIT SLIP ITEM -->
+  <div id="modal-edit-item" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Edit Packed Pcs</h3>
+        <button class="modal-close" id="modal-edit-item-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-edit-item">
+        <input type="hidden" id="edit-item-id">
+        <div class="form-group">
+          <label>Item Name</label>
+          <div style="font-size: 14px; font-weight: bold; margin-bottom: 10px; color: var(--text-main);" id="edit-item-name-display">Item Name</div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Order Pcs</label>
+            <div id="edit-item-order-pcs" style="font-size: 13px; color: var(--text-sub); font-weight: 500;">0</div>
+          </div>
+          <div class="form-group">
+            <label>Bal Pcs</label>
+            <div id="edit-item-bal-pcs" style="font-size: 13px; color: var(--text-sub); font-weight: 500;">0</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Pack Pcs *</label>
+          <input type="number" id="edit-item-pack-pcs" step="any" min="0.001" required>
+        </div>
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label>Pack Type</label>
+          <select id="edit-item-pack-type">
+            <!-- Rendered dynamically -->
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Save Changes</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD NEW USER -->
+  <div id="modal-add-user" class="modal">
+    <div class="modal-content" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-user-plus" style="color:#10b981;"></i> Add New User</h3>
+        <button class="modal-close" id="modal-add-user-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-add-user">
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>User ID / Username *</label>
+          <input type="text" id="add-user-id" placeholder="e.g. rahul" required>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>Full Name *</label>
+          <input type="text" id="add-user-name" placeholder="e.g. Rahul Sharma" required>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>Initial Password *</label>
+          <input type="password" id="add-user-password" placeholder="Enter password" required>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>Role</label>
+          <select id="add-user-role" class="form-control">
+            <option value="Staff">Staff</option>
+            <option value="Supervisor">Supervisor</option>
+            <option value="Admin">Admin</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Create User</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADMIN RESET USER PASSWORD -->
+  <div id="modal-reset-password" class="modal">
+    <div class="modal-content" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-key" style="color:#f59e0b;"></i> Reset User Password</h3>
+        <button class="modal-close" id="modal-reset-password-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-reset-user-password">
+        <input type="hidden" id="reset-target-user-id">
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>Target User</label>
+          <div id="reset-target-user-name" style="font-weight:700; color:var(--primary); font-size:15px; margin-top:4px;">User</div>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>New Password *</label>
+          <input type="password" id="reset-new-password" placeholder="Enter new password" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Update Password</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="toast">Configuration Saved</div>
+
+  <!-- MODAL: CHALLAN PHOTO GALLERY & UPLOAD -->
+  <div id="modal-challan-image" class="modal">
+    <div class="modal-content" style="max-width: 560px; width: 92%;">
+      <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3><i class="fa-solid fa-camera" style="color:#00c9ff;"></i> Challan Photos (<span id="modal-challan-title-no">Challan</span>)</h3>
+        <button class="modal-close" id="modal-challan-image-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body" style="padding-top:14px;">
+        <!-- File Upload Section -->
+        <form id="form-upload-challan-image" style="background:var(--bg-app); border:2px dashed var(--bg-card-border); padding:16px; border-radius:12px; text-align:center; margin-bottom:16px;">
+          <input type="hidden" id="upload-challan-no">
+          <input type="file" id="challan-image-file-input" accept="image/*" multiple style="display:none;">
+          <input type="file" id="challan-camera-input" accept="image/*" capture="environment" style="display:none;">
+          
+          <div style="margin-bottom:10px;">
+            <i class="fa-solid fa-cloud-arrow-up" style="font-size:32px; color:var(--primary);"></i>
+            <div style="font-size:13px; font-weight:600; margin-top:6px;">Upload Item / Challan Photo(s)</div>
+            <div style="font-size:11px; color:var(--text-sub);">Ek ya Multiple files select karein ya Mobile Camera se Photo click karein</div>
+          </div>
+
+          <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('challan-image-file-input').click()"><i class="fa-solid fa-folder-open"></i> Select File(s)</button>
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('challan-camera-input').click()"><i class="fa-solid fa-camera"></i> Open Camera</button>
+          </div>
+          <div id="selected-file-name" style="font-size:12px; color:var(--color-success); font-weight:600; margin-top:8px;"></div>
+          <button type="submit" id="btn-submit-upload-image" class="btn btn-success btn-block" style="display:none; margin-top:12px;"><i class="fa-solid fa-upload"></i> Save & Attach Photo(s)</button>
+        </form>
+
+        <!-- Print Photo Sheet Bar -->
+        <div style="background:var(--bg-card-header, #1e293b); padding:10px 14px; border-radius:10px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div style="font-size:12px; font-weight:700; color:var(--text-primary, #fff);">
+            <i class="fa-solid fa-print" style="color:#00c9ff; margin-right:4px;"></i> Print Photos Layout:
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <select id="photo-print-layout" class="form-control" style="width:auto; padding:4px 8px; font-size:12px; font-weight:700; height:32px; background:var(--bg-app); border:1px solid var(--bg-card-border); color:var(--text-primary);">
+              <option value="a4_4" selected>A4 Full Paper - 4 Photos (2x2)</option>
+              <option value="a4_2">A4 Full Paper - 2 Photos</option>
+              <option value="a4_1">A4 Full Paper - 1 Photo (Full)</option>
+              <option value="half_2">A4 Half Paper (A5) - 2 Photos</option>
+              <option value="half_4">A4 Half Paper (A5) - 4 Photos</option>
+              <option value="half_1">A4 Half Paper (A5) - 1 Photo</option>
+              <option value="3x4">3 x 4 Grid (12 / page)</option>
+              <option value="5x4">5 x 4 Grid (20 / page)</option>
+              <option value="4x5">4 x 5 Grid (20 / page)</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-info" onclick="printChallanPhotosSheet()" style="padding:5px 12px; font-weight:700; font-size:12px; height:32px;"><i class="fa-solid fa-print"></i> Print Sheet</button>
+          </div>
+        </div>
+
+        <!-- Photo Gallery Grid -->
+        <div id="challan-photos-container" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:12px; max-height:50vh; overflow-y:auto; padding:4px;">
+          <div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading photos...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULLSCREEN PHOTO PREVIEW MODAL WITH PRINT OPTIONS -->
+  <div id="modal-full-photo" class="modal" style="z-index: 10000;">
+    <div class="modal-content" style="max-width: 90vw; max-height: 92vh; background: #090d16; border: 1px solid #1e293b; border-radius:16px; padding:16px; text-align: center; position: relative; margin: auto; display:flex; flex-direction:column; align-items:center;">
+      
+      <!-- Header with Print & Close Controls -->
+      <div style="width:100%; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #1e293b; padding-bottom:10px; flex-wrap:wrap; gap:10px;">
+        <div style="font-size:14px; font-weight:700; color:#fff;">
+          <i class="fa-solid fa-image" style="color:#00c9ff; margin-right:6px;"></i> Photo Zoom & Print
+        </div>
+        
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <select id="full-photo-paper-preset" class="form-control" style="width:auto; height:34px; padding:4px 10px; font-size:12px; font-weight:700; background:#0f172a; border:1px solid #334155; color:#fff;">
+            <option value="a4_4" selected>A4 Full Paper - 4 Photos (2x2)</option>
+            <option value="a4_2">A4 Full Paper - 2 Photos</option>
+            <option value="a4_1">A4 Full Paper - 1 Photo (Full)</option>
+            <option value="half_2">A4 Half Paper (A5) - 2 Photos</option>
+            <option value="half_4">A4 Half Paper (A5) - 4 Photos</option>
+            <option value="half_1">A4 Half Paper (A5) - 1 Photo</option>
+            <option value="3x4">A4 Grid - 3 x 4 (12 Photos)</option>
+            <option value="5x4">A4 Grid - 5 x 4 (20 Photos)</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-info" onclick="printZoomedPhoto()" style="padding:6px 14px; font-weight:700; font-size:12px; height:34px;"><i class="fa-solid fa-print"></i> Print Photo</button>
+          <button class="modal-close" id="modal-full-photo-close" style="font-size:24px; color:#fff; background:rgba(255,255,255,0.1); border-radius:50%; width:34px; height:34px; display:flex; align-items:center; justify-content:center; cursor:pointer; border:none;">&times;</button>
+        </div>
+      </div>
+
+      <!-- Zoomed Image -->
+      <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+        <img id="full-photo-img" src="" alt="Full Preview" style="max-width: 100%; max-height: 75vh; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); object-fit:contain;">
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL: PARTIAL / MANUAL PCS ENTRY FOR FOLDING & CHECKING -->
+  <div id="modal-folding-pcs" class="modal">
+    <div class="modal-content" style="max-width: 440px; width: 90%;">
+      <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3><i class="fa-solid fa-calculator" style="color:var(--primary);"></i> Enter <span id="fp-modal-process-title">Process</span> Pcs</h3>
+        <button class="modal-close" id="modal-folding-pcs-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form id="form-folding-pcs" style="padding-top:10px;">
+        <input type="hidden" id="fp-modal-challan-no">
+        <input type="hidden" id="fp-modal-worker-id">
+        <input type="hidden" id="fp-modal-worker-name">
+        <input type="hidden" id="fp-modal-process-type">
+        <input type="hidden" id="fp-modal-total-pcs">
+        <input type="hidden" id="fp-modal-current-done">
+
+        <div style="background:var(--bg-app); border:1px solid var(--bg-card-border); padding:12px; border-radius:10px; margin-bottom:14px;">
+          <div style="font-size:14px; font-weight:700; color:var(--primary);" id="fp-modal-challan-label">Challan No</div>
+          <div style="font-size:12px; color:var(--text-sub);" id="fp-modal-worker-label">Worker Name</div>
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:10px; text-align:center;">
+            <div style="background:var(--bg-card); padding:6px; border-radius:6px; border:1px solid var(--bg-card-border);">
+              <span style="font-size:9px; color:var(--text-sub); display:block;">TOTAL ISSUED</span>
+              <strong style="font-size:14px; color:var(--text-main);" id="fp-modal-disp-total">100</strong>
+            </div>
+            <div style="background:var(--bg-card); padding:6px; border-radius:6px; border:1px solid var(--bg-card-border);">
+              <span style="font-size:9px; color:var(--text-sub); display:block;">ALREADY DONE</span>
+              <strong style="font-size:14px; color:#10b981;" id="fp-modal-disp-done">0</strong>
+            </div>
+            <div style="background:var(--bg-card); padding:6px; border-radius:6px; border:1px solid var(--bg-card-border);">
+              <span style="font-size:9px; color:var(--text-sub); display:block;">REMAINING</span>
+              <strong style="font-size:14px; color:#ef4444;" id="fp-modal-disp-rem">100</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px;">
+          <label style="font-weight:700;">Enter Pcs to process now *</label>
+          <input type="number" id="fp-modal-enter-pcs" min="1" step="any" required placeholder="Enter Pcs" style="font-size:18px; font-weight:700; text-align:center; padding:10px;">
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <button type="submit" class="btn btn-primary btn-block"><i class="fa-solid fa-check"></i> Add Pcs</button>
+          <button type="button" class="btn btn-success btn-block" onclick="submitFullFoldingPcs()"><i class="fa-solid fa-double-check"></i> Full Done</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+
+
+  <!-- Floating Scroll-to-Top Button -->
+  <button id="btn-scroll-top" class="scroll-to-top-btn"><i class="fa-solid fa-arrow-up"></i></button>
+
+  <!-- Scripts -->
+  <script src="/static/js/main.js?v=2.5"></script>
+</body>
+</html>
