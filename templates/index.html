@@ -19,7 +19,7 @@
   <!-- SheetJS for Excel Export -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- Local Stylesheet -->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.7">
+  <link rel="stylesheet" href="/static/css/style.css?v=4.0">
 </head>
 <body>
 
@@ -63,7 +63,7 @@
       <a href="/api/logout" class="btn-drawer-logout" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></a>
     </div>
 
-    <ul class="drawer-menu">
+    <ul class="drawer-menu" style="overflow-y: scroll !important; max-height: calc(100vh - 120px) !important; flex: 1 !important; padding-right: 6px; scrollbar-width: thin; scrollbar-color: #6366f1 rgba(255,255,255,0.1);">}
       <li class="menu-item active" data-tab="home"><i class="fa-solid fa-house"></i> Home Dashboard</li>
       <li class="menu-item" data-tab="slips"><i class="fa-solid fa-list-check"></i> Packing Slips</li>
       <li class="menu-item" data-tab="bill-report"><i class="fa-solid fa-file-invoice-dollar"></i> Bill Report</li>
