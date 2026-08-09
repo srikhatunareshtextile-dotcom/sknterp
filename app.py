@@ -1364,9 +1364,11 @@ def slips():
     rows = c.fetchall()
     conn.close()
 
-    result = []
-    for r in rows:
-        result.append(dict(r))
+    result = [dict(r) for r in rows]
+    if not result and (is_cloud_mode() or try_import_pyodbc() is None):
+        snap = load_cloud_snapshot()
+        if snap:
+            result = snap.get("reports", {}).get("packing_slips", [])
     return jsonify(result)
 
 @app.route("/api/slips/<int:slip_id>", methods=["GET", "DELETE"])
@@ -1709,20 +1711,49 @@ def get_all_stock_report():
         reports = snap.get("reports", {})
         search_query = request.args.get("search", "").strip().upper()
         include_opening = request.args.get("include_opening", "false").lower() == "true"
-        group_stock_raw = reports.get("group_stock", {})
-        result = []
-        for grp, stk_val in group_stock_raw.items():
-            grp_up = str(grp).strip().upper()
-            if search_query and search_query not in grp_up:
+
+        # Build job_issue by group
+        job_issues = {}
+        for ji in reports.get("job_issue", []):
+            if not include_opening and ji.get("is_opening"):
                 continue
+            grp = str(ji.get("itemname", "") or "").strip().upper()
+            bal = float(ji.get("balpcs", 0) or 0)
+            if grp:
+                job_issues[grp] = job_issues.get(grp, 0) + bal
+
+        # Build reprocess by group
+        job_reproc = {}
+        for rp in reports.get("reprocess_stock", []):
+            if not include_opening and rp.get("is_opening"):
+                continue
+            grp = str(rp.get("itemname", "") or "").strip().upper()
+            bal = float(rp.get("balpcs", 0) or 0)
+            if grp:
+                job_reproc[grp] = job_reproc.get(grp, 0) + bal
+
+        group_stock_raw = reports.get("group_stock", {})
+        stocks = {str(k).strip().upper(): float(v or 0) for k, v in group_stock_raw.items()}
+
+        all_groups = set(stocks) | set(job_issues) | set(job_reproc)
+        result = []
+        for grp in sorted(all_groups):
+            if search_query and search_query not in grp:
+                continue
+            stk_val = stocks.get(grp, 0.0)
+            ji_val = job_issues.get(grp, 0.0)
+            jr_val = job_reproc.get(grp, 0.0)
+            tot_val = stk_val + ji_val + jr_val
             result.append({
-                "group_name": grp_up,
-                "item_name": grp_up,
-                "stock_pcs": int(float(stk_val or 0)),
+                "group_name": grp,
+                "item_name": grp,
+                "stock_pcs": int(stk_val),
+                "job_issue_pcs": int(ji_val),
+                "job_reprocess_pcs": int(jr_val),
+                "total_stock_pcs": int(tot_val),
                 "from_snapshot": True,
                 "snapshot_time": snap.get("sync_time", "")
             })
-        result.sort(key=lambda x: x["group_name"])
         return jsonify(result)
     # === END CLOUD FALLBACK ===
 
@@ -2117,12 +2148,38 @@ def get_party_hastes(party_name):
 def get_order_details_endpoint():
     status_filter = request.args.get("status", "all").lower()
     sort_by = request.args.get("sort_by", "party").lower()
-    party_name = request.args.get("party", "").strip()
-    group_name = request.args.get("group", "").strip()
+    party_name = request.args.get("party", "").strip().upper()
+    group_name = request.args.get("group", "").strip().upper()
     haste_name = request.args.get("haste", "").strip()
     include_opening = request.args.get("include_opening", "false").lower() == "true"
     
     _, sql_settings = load_settings()
+
+    # === CLOUD FALLBACK ===
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify({"error": "Cloud snapshot not available.", "cloud_mode": True}), 503
+        all_ods = snap.get("reports", {}).get("order_details", [])
+        results = []
+        for od in all_ods:
+            p = str(od.get("party", "") or "").strip().upper()
+            grp = str(od.get("group_name", "") or "").strip().upper()
+            bal = float(od.get("bal_pcs", 0) or 0)
+            if status_filter in ["pending", "p"] and bal <= 0:
+                continue
+            if party_name and party_name not in p:
+                continue
+            if group_name and group_name not in grp:
+                continue
+            results.append(od)
+        if sort_by == "date":
+            results.sort(key=lambda x: str(x.get("order_date", "")))
+        else:
+            results.sort(key=lambda x: str(x.get("party", "")))
+        return jsonify(results)
+    # === END CLOUD FALLBACK ===
+
     try:
         results = query_order_details(
             sql_settings, status_filter, sort_by, party_name, group_name,
@@ -2261,6 +2318,14 @@ def api_bill_report():
 @app.route("/api/reports/bill_report_filters")
 def api_bill_report_filters():
     _, sql_settings = load_settings()
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        if snap:
+            ods = snap.get("reports", {}).get("order_details", [])
+            parties = sorted(list({str(od.get("party", "") or "").strip() for od in ods if od.get("party")}))
+            groups = sorted(list({str(od.get("group_name", "") or "").strip() for od in ods if od.get("group_name")}))
+            return jsonify({"status": "success", "parties": parties, "groups": groups, "cloud_mode": True})
+        return jsonify({"status": "success", "parties": [], "groups": []})
     try:
         filters = query_bill_report_filters(sql_settings)
         return jsonify({
