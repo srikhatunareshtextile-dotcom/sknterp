@@ -358,6 +358,14 @@ def init_local_db(db_path):
     conn.commit()
     conn.close()
 
+# Auto-initialize local database schema on startup
+try:
+    _startup_db_path, _ = load_settings()
+    init_local_db(_startup_db_path)
+except Exception as _ex:
+    print(f"Startup DB init notice: {_ex}")
+
+
 def get_sql_server_connection(s):
     pyodbc = try_import_pyodbc()
     if pyodbc is None:
@@ -413,6 +421,15 @@ def get_sql_server_prev_connection(s):
 
 # HTTP Endpoints
 
+@app.errorhandler(Exception)
+def handle_500_exception(e):
+    import traceback
+    err_tb = traceback.format_exc()
+    print(f"Unhandled Exception: {e}\n{err_tb}")
+    if request.path.startswith('/api/'):
+        return jsonify({"error": str(e), "traceback": err_tb}), 500
+    return f"<h2>500 Internal Server Error</h2><p><b>Error:</b> {e}</p><pre>{err_tb}</pre>", 500
+
 @app.after_request
 def add_no_cache_headers(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -420,11 +437,17 @@ def add_no_cache_headers(response):
     response.headers['Expires'] = '0'
     return response
 
+
 @app.route("/login")
 def login():
-    if 'user_id' in session:
-        return redirect(url_for('index'))
-    return render_template("login.html")
+    try:
+        if 'user_id' in session:
+            return redirect(url_for('index'))
+        return render_template("login.html")
+    except Exception as e:
+        import traceback
+        return f"<h3>Login Page Error</h3><pre>{e}\n\n{traceback.format_exc()}</pre>", 500
+
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
@@ -765,9 +788,14 @@ def api_delete_challan_image():
 
 @app.route("/")
 def index():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    return render_template("index.html")
+    try:
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return render_template("index.html")
+    except Exception as e:
+        import traceback
+        return f"<h3>Index Page Error</h3><pre>{e}\n\n{traceback.format_exc()}</pre>", 500
+
 
 
 @app.route("/api/dashboard")
@@ -2005,11 +2033,26 @@ def service_worker():
 
 @app.route("/logo.png")
 def logo():
-    # If custom logo exists in directory, serve it, else serve standard fallback or template
     logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logo.png")
     if os.path.exists(logo_path):
         return send_from_directory(os.path.dirname(logo_path), "logo.png")
     return jsonify({"error": "Logo image not found"}), 404
+
+@app.route("/static/css/style.css")
+
+def serve_css():
+    css_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "css", "style.css")
+    if os.path.exists(css_p):
+        return send_from_directory(os.path.dirname(css_p), "style.css", mimetype="text/css")
+    return "/* CSS embedded in template */", 200, {"Content-Type": "text/css"}
+
+@app.route("/static/js/main.js")
+def serve_js():
+    js_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js", "main.js")
+    if os.path.exists(js_p):
+        return send_from_directory(os.path.dirname(js_p), "main.js", mimetype="application/javascript")
+    return "// JS fallback", 200, {"Content-Type": "application/javascript"}
+
 
 
 
