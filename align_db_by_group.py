@@ -1,4 +1,10 @@
-import pyodbc
+try:
+    import pyodbc
+    PYODBC_AVAILABLE = True
+except ImportError:
+    pyodbc = None
+    PYODBC_AVAILABLE = False
+
 import xml.etree.ElementTree as ET
 
 def parse_excel(file_path):
