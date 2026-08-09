@@ -2549,12 +2549,48 @@ def api_cloud_sync_push_snapshot():
     snap_path = save_local_snapshot_file(snapshot_data)
     cfg["last_sync_time"] = snapshot_data.get("sync_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     save_cloud_sync_config(cfg)
-    
+
+    # Sync Challan Images map
+    if "images_map" in snapshot_data and snapshot_data["images_map"]:
+        try:
+            save_challan_images_map(snapshot_data["images_map"])
+        except Exception as e:
+            print(f"Cloud sync images_map error: {e}")
+
+    # Sync Folding Payment Ticks to SQLite
+    if "reports" in snapshot_data and "folding_payment_ticks" in snapshot_data["reports"]:
+        ticks = snapshot_data["reports"]["folding_payment_ticks"]
+        local_db, _ = load_settings()
+        try:
+            conn = get_local_sqlite_connection(local_db)
+            c = conn.cursor()
+            for t in ticks:
+                c.execute("""
+                    INSERT OR REPLACE INTO folding_payment_ticks
+                    (challan_no, worker_id, process_type, job_item, worker_name, pcs, is_paid, paid_date, paid_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    t.get("challan_no"),
+                    t.get("worker_id"),
+                    t.get("process_type", "CHARAK"),
+                    t.get("job_item", ""),
+                    t.get("worker_name", ""),
+                    t.get("pcs", 0),
+                    1 if t.get("is_paid") else 0,
+                    t.get("paid_date", ""),
+                    t.get("paid_by", "")
+                ))
+            conn.commit()
+            conn.close()
+        except Exception as ex:
+            print(f"Error populating folding_payment_ticks on Cloud: {ex}")
+
     return jsonify({
         "status": "success",
         "message": "Snapshot successfully received and saved on Cloud server!",
         "sync_time": cfg["last_sync_time"]
     })
+
 
 @app.route("/api/cloud_sync/status", methods=["GET"])
 def api_cloud_sync_status():
