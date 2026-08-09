@@ -1,5 +1,10 @@
-import pyodbc
+try:
+    import pyodbc
+except ImportError:
+    pyodbc = None
+
 import xml.etree.ElementTree as ET
+
 
 def parse_excel(file_path):
     ns = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
@@ -43,7 +48,11 @@ def get_item_group(itm, item_to_group):
     return grp if grp else 'NONE'
 
 def run():
+    if pyodbc is None:
+        print("pyodbc is not available on this platform.")
+        return
     file_path = r"d:\equal\EQUAL DOCUMENT\finish 1407 ki date ka 4.49.xls"
+
     excel_map = parse_excel(file_path)
     excel_groups = set(excel_map.keys())
     print(f"Loaded {len(excel_map)} groups from new Excel file.")
