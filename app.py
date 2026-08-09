@@ -1303,7 +1303,13 @@ def slips():
     result = []
     for r in rows:
         result.append(dict(r))
+    if not result and is_cloud_mode():
+        from cloud_sync_utils import load_local_snapshot_file
+        snap = load_local_snapshot_file()
+        if snap and "reports" in snap and "packing_slips" in snap["reports"]:
+            result = snap["reports"]["packing_slips"]
     return jsonify(result)
+
 
 @app.route("/api/slips/<int:slip_id>", methods=["GET", "DELETE"])
 def slip_detail(slip_id):
@@ -2585,11 +2591,59 @@ def api_cloud_sync_push_snapshot():
         except Exception as ex:
             print(f"Error populating folding_payment_ticks on Cloud: {ex}")
 
+    # Sync Packing Slips & Items to SQLite
+    if "reports" in snapshot_data and "packing_slips" in snapshot_data["reports"]:
+        slips = snapshot_data["reports"]["packing_slips"]
+        local_db, _ = load_settings()
+        try:
+            conn = get_local_sqlite_connection(local_db)
+            c = conn.cursor()
+            for s in slips:
+                c.execute("""
+                    INSERT OR REPLACE INTO packing_slips
+                    (id, slip_no, slip_date, party, group_name, view_type, created_at, remarks, haste)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    s.get("id"),
+                    s.get("slip_no"),
+                    s.get("slip_date"),
+                    s.get("party"),
+                    s.get("group_name", ""),
+                    s.get("view_type", "detailed"),
+                    s.get("created_at"),
+                    s.get("remarks", ""),
+                    s.get("haste", "")
+                ))
+                for item in s.get("items", []):
+                    c.execute("""
+                        INSERT OR REPLACE INTO packing_slip_items
+                        (id, slip_id, order_no, order_date, party, group_name, item_name, order_pcs, stock_pcs, bal_pcs, pack_pcs, pack_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        item.get("id"),
+                        s.get("id"),
+                        item.get("order_no", ""),
+                        item.get("order_date", ""),
+                        item.get("party", ""),
+                        item.get("group_name", ""),
+                        item.get("item_name", ""),
+                        item.get("order_pcs", 0),
+                        item.get("stock_pcs", 0),
+                        item.get("bal_pcs", 0),
+                        item.get("pack_pcs", 0),
+                        item.get("pack_type", "PCS")
+                    ))
+            conn.commit()
+            conn.close()
+        except Exception as ex:
+            print(f"Error populating packing_slips on Cloud: {ex}")
+
     return jsonify({
         "status": "success",
         "message": "Snapshot successfully received and saved on Cloud server!",
         "sync_time": cfg["last_sync_time"]
     })
+
 
 
 @app.route("/api/cloud_sync/status", methods=["GET"])

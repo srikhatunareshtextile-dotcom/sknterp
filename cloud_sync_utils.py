@@ -29,6 +29,8 @@ def save_cloud_sync_config(cfg):
     except Exception as e:
         print(f"Error saving cloud sync config: {e}")
 
+import base64
+
 def export_all_reports_snapshot(sql_settings, local_db):
     """
     Exports clean snapshots of all main ERP reports for Cloud storage:
@@ -37,7 +39,8 @@ def export_all_reports_snapshot(sql_settings, local_db):
     3. Job Issue Report
     4. Reprocess Stock Report
     5. Folding Payment (Charak) Ticks & Verification Status
-    6. Challan Images Map
+    6. Packing Slips & Slip Items
+    7. Base64 Encoded Challan Images Map
     """
     from stock_calc_utils import (
         query_order_details,
@@ -47,10 +50,34 @@ def export_all_reports_snapshot(sql_settings, local_db):
     )
     from app import load_challan_images_map, get_local_sqlite_connection
 
+    # Convert Challan Images to base64 Data URIs so images render natively on Cloud!
+    raw_images_map = load_challan_images_map()
+    b64_images_map = {}
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    for challan_no, img_list in raw_images_map.items():
+        b64_list = []
+        for img in img_list:
+            img_item = dict(img)
+            url = img_item.get("url", "")
+            if url and not url.startswith("data:image"):
+                rel_p = url.lstrip("/")
+                full_p = os.path.join(base_dir, rel_p)
+                if os.path.exists(full_p):
+                    try:
+                        with open(full_p, "rb") as f:
+                            b64_data = base64.b64encode(f.read()).decode("utf-8")
+                            ext = os.path.splitext(full_p)[1].lower().lstrip(".") or "jpeg"
+                            if ext == "jpg": ext = "jpeg"
+                            img_item["url"] = f"data:image/{ext};base64,{b64_data}"
+                    except Exception as ex:
+                        print(f"Error encoding image {full_p}: {ex}")
+            b64_list.append(img_item)
+        b64_images_map[challan_no] = b64_list
+
     snapshot = {
         "sync_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "reports": {},
-        "images_map": load_challan_images_map()
+        "images_map": b64_images_map
     }
 
     # 1. Order Details
@@ -108,7 +135,27 @@ def export_all_reports_snapshot(sql_settings, local_db):
         print(f"Cloud Export Folding Payment Ticks Error: {e}")
 
     snapshot["reports"]["folding_payment_ticks"] = ticks_data
+
+    # 6. Packing Slips & Items
+    slips_list = []
+    try:
+        conn = get_local_sqlite_connection(local_db)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM packing_slips ORDER BY id DESC")
+        for s in c.fetchall():
+            s_dict = dict(s)
+            c2 = conn.cursor()
+            c2.execute("SELECT * FROM packing_slip_items WHERE slip_id = ?", (s_dict["id"],))
+            s_dict["items"] = [dict(it) for it in c2.fetchall()]
+            slips_list.append(s_dict)
+        conn.close()
+    except Exception as e:
+        print(f"Cloud Export Packing Slips Error: {e}")
+
+    snapshot["reports"]["packing_slips"] = slips_list
     return snapshot
+
 
 def save_local_snapshot_file(snapshot):
     """Saves local offline fallback snapshot JSON file on disk."""
