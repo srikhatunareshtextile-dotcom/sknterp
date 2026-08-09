@@ -358,14 +358,6 @@ def init_local_db(db_path):
     conn.commit()
     conn.close()
 
-# Auto-initialize local database schema on startup
-try:
-    _startup_db_path, _ = load_settings()
-    init_local_db(_startup_db_path)
-except Exception as _ex:
-    print(f"Startup DB init notice: {_ex}")
-
-
 def get_sql_server_connection(s):
     pyodbc = try_import_pyodbc()
     if pyodbc is None:
@@ -421,15 +413,6 @@ def get_sql_server_prev_connection(s):
 
 # HTTP Endpoints
 
-@app.errorhandler(Exception)
-def handle_500_exception(e):
-    import traceback
-    err_tb = traceback.format_exc()
-    print(f"Unhandled Exception: {e}\n{err_tb}")
-    if request.path.startswith('/api/'):
-        return jsonify({"error": str(e), "traceback": err_tb}), 500
-    return f"<h2>500 Internal Server Error</h2><p><b>Error:</b> {e}</p><pre>{err_tb}</pre>", 500
-
 @app.after_request
 def add_no_cache_headers(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -437,17 +420,11 @@ def add_no_cache_headers(response):
     response.headers['Expires'] = '0'
     return response
 
-
 @app.route("/login")
 def login():
-    try:
-        if 'user_id' in session:
-            return redirect(url_for('index'))
-        return render_template("login.html")
-    except Exception as e:
-        import traceback
-        return f"<h3>Login Page Error</h3><pre>{e}\n\n{traceback.format_exc()}</pre>", 500
-
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    return render_template("login.html")
 
 @app.route("/api/login", methods=["POST"])
 def api_login():
@@ -788,14 +765,9 @@ def api_delete_challan_image():
 
 @app.route("/")
 def index():
-    try:
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return render_template("index.html")
-    except Exception as e:
-        import traceback
-        return f"<h3>Index Page Error</h3><pre>{e}\n\n{traceback.format_exc()}</pre>", 500
-
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    return render_template("index.html")
 
 
 @app.route("/api/dashboard")
@@ -1303,13 +1275,7 @@ def slips():
     result = []
     for r in rows:
         result.append(dict(r))
-    if not result and is_cloud_mode():
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "packing_slips" in snap["reports"]:
-            result = snap["reports"]["packing_slips"]
     return jsonify(result)
-
 
 @app.route("/api/slips/<int:slip_id>", methods=["GET", "DELETE"])
 def slip_detail(slip_id):
@@ -1562,12 +1528,9 @@ def req_report():
 @app.route("/api/all_stock")
 def get_all_stock_report():
     _, sql_settings = load_settings()
-    if try_import_pyodbc() is None or is_cloud_mode():
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "group_stock" in snap["reports"]:
-            return jsonify(snap["reports"]["group_stock"])
-
+    pyodbc_installed = try_import_pyodbc() is not None
+    if not pyodbc_installed:
+        return jsonify({"error": "pyodbc not installed on server PC."}), 500
     
     include_opening = request.args.get("include_opening", "false").lower() == "true"
     search_query = request.args.get("search", "").strip().upper()
@@ -1966,20 +1929,13 @@ def get_order_details_endpoint():
     
     _, sql_settings = load_settings()
     try:
-        if try_import_pyodbc() is None or is_cloud_mode():
-            raise Exception("Cloud snapshot fallback")
         results = query_order_details(
             sql_settings, status_filter, sort_by, party_name, group_name,
             haste_name=haste_name, include_opening=include_opening
         )
         return jsonify(results)
     except Exception as e:
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "order_details" in snap["reports"]:
-            return jsonify(snap["reports"]["order_details"])
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/settings", methods=["GET", "POST"])
 def handle_settings():
@@ -2049,28 +2005,11 @@ def service_worker():
 
 @app.route("/logo.png")
 def logo():
+    # If custom logo exists in directory, serve it, else serve standard fallback or template
     logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logo.png")
     if os.path.exists(logo_path):
         return send_from_directory(os.path.dirname(logo_path), "logo.png")
     return jsonify({"error": "Logo image not found"}), 404
-
-@app.route("/static/css/style.css")
-def serve_css():
-    css_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "css", "style.css")
-    if os.path.exists(css_p):
-        return send_from_directory(os.path.dirname(css_p), "style.css", mimetype="text/css")
-    from embedded_static import STYLE_CSS_CONTENT
-    return STYLE_CSS_CONTENT, 200, {"Content-Type": "text/css; charset=utf-8"}
-
-@app.route("/static/js/main.js")
-def serve_js():
-    js_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js", "main.js")
-    if os.path.exists(js_p):
-        return send_from_directory(os.path.dirname(js_p), "main.js", mimetype="application/javascript")
-    from embedded_static import MAIN_JS_CONTENT
-    return MAIN_JS_CONTENT, 200, {"Content-Type": "application/javascript; charset=utf-8"}
-
-
 
 
 
@@ -2093,19 +2032,9 @@ def run_script():
 @app.route("/api/reports/bill_report")
 def api_bill_report():
     _, sql_settings = load_settings()
-    if try_import_pyodbc() is None or is_cloud_mode():
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "bill_report" in snap["reports"]:
-            data = snap["reports"]["bill_report"]
-            return jsonify({
-                "status": "success",
-                "total_rows": len(data),
-                "total_pcs": sum(r.get("pcs", 0) for r in data),
-                "total_amount": sum(r.get("amount", 0) for r in data),
-                "data": data
-            })
-
+    pyodbc_installed = try_import_pyodbc() is not None
+    if not pyodbc_installed:
+        return jsonify({"error": "pyodbc not installed on server PC."}), 500
 
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
@@ -2160,8 +2089,6 @@ def api_job_issue_report():
     include_opening = request.args.get("include_opening", "false").strip().lower() in ("true", "1", "yes")
 
     try:
-        if try_import_pyodbc() is None or is_cloud_mode():
-            raise Exception("Cloud snapshot fallback")
         data = query_job_issue_report(
             sql_settings,
             status=status_filter,
@@ -2172,28 +2099,22 @@ def api_job_issue_report():
             date_to=date_to,
             include_opening=include_opening
         )
+        non_opening = [r for r in data if not r.get("is_opening")]
+        return jsonify({
+            "status": "success",
+            "total_rows": len(data),
+            "total_pcs": sum(r["pcs"] for r in non_opening),
+            "total_plainpcs": sum(r["plainpcs"] for r in non_opening),
+            "total_recpcs": sum(r["recpcs"] for r in non_opening),
+            "total_secpcs": sum(r["secpcs"] for r in non_opening),
+            "total_shtpcs": sum(r["shtpcs"] for r in non_opening),
+            "total_balpcs": sum(r["balpcs"] for r in data),
+            "total_wastepcs": sum(r["wastepcs"] for r in non_opening),
+            "total_retpcs": sum(r["retpcs"] for r in non_opening),
+            "data": data
+        })
     except Exception as e:
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "job_issue" in snap["reports"]:
-            data = snap["reports"]["job_issue"]
-        else:
-            return jsonify({"error": f"Failed to load Job Work Issue report: {e}"}), 500
-
-    non_opening = [r for r in data if not r.get("is_opening")]
-    return jsonify({
-        "status": "success",
-        "total_rows": len(data),
-        "total_pcs": sum(r.get("pcs", 0) for r in non_opening),
-        "total_plainpcs": sum(r.get("plainpcs", 0) for r in non_opening),
-        "total_recpcs": sum(r.get("recpcs", 0) for r in non_opening),
-        "total_secpcs": sum(r.get("secpcs", 0) for r in non_opening),
-        "total_shtpcs": sum(r.get("shtpcs", 0) for r in non_opening),
-        "total_balpcs": sum(r.get("balpcs", 0) for r in data),
-        "total_wastepcs": sum(r.get("wastepcs", 0) for r in non_opening),
-        "total_retpcs": sum(r.get("retpcs", 0) for r in non_opening),
-        "data": data
-    })
+        return jsonify({"error": f"Failed to load Job Work Issue report: {e}"}), 500
 
 @app.route("/api/job_reprocess_report")
 @app.route("/api/reports/job_reprocess")
@@ -2209,8 +2130,6 @@ def api_job_reprocess_report():
     include_opening = request.args.get("include_opening", "false").strip().lower() in ("true", "1", "yes")
 
     try:
-        if try_import_pyodbc() is None or is_cloud_mode():
-            raise Exception("Cloud snapshot fallback")
         data = query_job_reprocess_report(
             sql_settings,
             job_type=job_type,
@@ -2222,25 +2141,18 @@ def api_job_reprocess_report():
             date_to=date_to,
             include_opening=include_opening
         )
+        non_opening = [r for r in data if not r.get("is_opening")]
+        return jsonify({
+            "status": "success",
+            "total_rows": len(data),
+            "total_pcs": sum(r["pcs"] for r in non_opening),
+            "total_plainpcs": sum(r["plainpcs"] for r in non_opening),
+            "total_rfpcs": sum(r["rfpcs"] for r in non_opening),
+            "total_balpcs": sum(r["balpcs"] for r in data),
+            "data": data
+        })
     except Exception as e:
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "reprocess_stock" in snap["reports"]:
-            data = snap["reports"]["reprocess_stock"]
-        else:
-            return jsonify({"error": f"Failed to load Job Reprocess report: {e}"}), 500
-
-    non_opening = [r for r in data if not r.get("is_opening")]
-    return jsonify({
-        "status": "success",
-        "total_rows": len(data),
-        "total_pcs": sum(r.get("pcs", 0) for r in non_opening),
-        "total_plainpcs": sum(r.get("plainpcs", 0) for r in non_opening),
-        "total_rfpcs": sum(r.get("rfpcs", 0) for r in non_opening),
-        "total_balpcs": sum(r.get("balpcs", 0) for r in data),
-        "data": data
-    })
-
+        return jsonify({"error": f"Failed to load Job Reprocess report: {e}"}), 500
 
 @app.route("/api/job_filters")
 def api_job_filters():
@@ -2377,13 +2289,7 @@ def api_folding_payment():
             data.append(item_obj)
     except Exception as e:
         print(f"SQL Server query fallback for folding payment: {e}")
-        from cloud_sync_utils import load_local_snapshot_file
-        snap = load_local_snapshot_file()
-        if snap and "reports" in snap and "job_issue" in snap["reports"]:
-            data = snap["reports"]["job_issue"]
-        else:
-            data = []
-
+        data = []
 
     return jsonify({
         "status": "success",
@@ -2555,96 +2461,12 @@ def api_cloud_sync_push_snapshot():
     snap_path = save_local_snapshot_file(snapshot_data)
     cfg["last_sync_time"] = snapshot_data.get("sync_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     save_cloud_sync_config(cfg)
-
-    # Sync Challan Images map
-    if "images_map" in snapshot_data and snapshot_data["images_map"]:
-        try:
-            save_challan_images_map(snapshot_data["images_map"])
-        except Exception as e:
-            print(f"Cloud sync images_map error: {e}")
-
-    # Sync Folding Payment Ticks to SQLite
-    if "reports" in snapshot_data and "folding_payment_ticks" in snapshot_data["reports"]:
-        ticks = snapshot_data["reports"]["folding_payment_ticks"]
-        local_db, _ = load_settings()
-        try:
-            conn = get_local_sqlite_connection(local_db)
-            c = conn.cursor()
-            for t in ticks:
-                c.execute("""
-                    INSERT OR REPLACE INTO folding_payment_ticks
-                    (challan_no, worker_id, process_type, job_item, worker_name, pcs, is_paid, paid_date, paid_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    t.get("challan_no"),
-                    t.get("worker_id"),
-                    t.get("process_type", "CHARAK"),
-                    t.get("job_item", ""),
-                    t.get("worker_name", ""),
-                    t.get("pcs", 0),
-                    1 if t.get("is_paid") else 0,
-                    t.get("paid_date", ""),
-                    t.get("paid_by", "")
-                ))
-            conn.commit()
-            conn.close()
-        except Exception as ex:
-            print(f"Error populating folding_payment_ticks on Cloud: {ex}")
-
-    # Sync Packing Slips & Items to SQLite
-    if "reports" in snapshot_data and "packing_slips" in snapshot_data["reports"]:
-        slips = snapshot_data["reports"]["packing_slips"]
-        local_db, _ = load_settings()
-        try:
-            conn = get_local_sqlite_connection(local_db)
-            c = conn.cursor()
-            for s in slips:
-                c.execute("""
-                    INSERT OR REPLACE INTO packing_slips
-                    (id, slip_no, slip_date, party, group_name, view_type, created_at, remarks, haste)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    s.get("id"),
-                    s.get("slip_no"),
-                    s.get("slip_date"),
-                    s.get("party"),
-                    s.get("group_name", ""),
-                    s.get("view_type", "detailed"),
-                    s.get("created_at"),
-                    s.get("remarks", ""),
-                    s.get("haste", "")
-                ))
-                for item in s.get("items", []):
-                    c.execute("""
-                        INSERT OR REPLACE INTO packing_slip_items
-                        (id, slip_id, order_no, order_date, party, group_name, item_name, order_pcs, stock_pcs, bal_pcs, pack_pcs, pack_type)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        item.get("id"),
-                        s.get("id"),
-                        item.get("order_no", ""),
-                        item.get("order_date", ""),
-                        item.get("party", ""),
-                        item.get("group_name", ""),
-                        item.get("item_name", ""),
-                        item.get("order_pcs", 0),
-                        item.get("stock_pcs", 0),
-                        item.get("bal_pcs", 0),
-                        item.get("pack_pcs", 0),
-                        item.get("pack_type", "PCS")
-                    ))
-            conn.commit()
-            conn.close()
-        except Exception as ex:
-            print(f"Error populating packing_slips on Cloud: {ex}")
-
+    
     return jsonify({
         "status": "success",
         "message": "Snapshot successfully received and saved on Cloud server!",
         "sync_time": cfg["last_sync_time"]
     })
-
-
 
 @app.route("/api/cloud_sync/status", methods=["GET"])
 def api_cloud_sync_status():
