@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import sqlite3
+import requests
 from io import BytesIO
 from datetime import datetime
 
@@ -264,14 +265,97 @@ def load_local_snapshot_file():
             pass
     return None
 
+def push_snapshot_to_cloud(snapshot, cfg):
+    """PC -> Render: uploads the full snapshot (reports + challan images) to the live cloud app."""
+    cloud_url = (cfg.get("cloud_url") or "").strip().rstrip("/")
+    if not cloud_url:
+        return {"pushed": False, "reason": "cloud_url not set in cloud_sync_config.json"}
+    api_key = cfg.get("api_key") or ""
+    try:
+        resp = requests.post(
+            f"{cloud_url}/api/cloud_sync/push_snapshot",
+            json=snapshot,
+            headers={"X-API-KEY": api_key},
+            timeout=90
+        )
+        resp.raise_for_status()
+        return {"pushed": True, "response": resp.json()}
+    except Exception as e:
+        print(f"Error pushing snapshot to cloud: {e}")
+        return {"pushed": False, "reason": str(e)}
+
+def pull_new_images_from_cloud(cfg):
+    """Render -> PC: fetches images uploaded directly on the cloud app (mobile) and
+    saves them into the local challan_images.json + local disk, so they survive
+    Render's ephemeral storage getting wiped on the next redeploy/restart."""
+    cloud_url = (cfg.get("cloud_url") or "").strip().rstrip("/")
+    if not cloud_url:
+        return {"pulled": 0, "reason": "cloud_url not set"}
+    api_key = cfg.get("api_key") or ""
+    try:
+        resp = requests.get(
+            f"{cloud_url}/api/cloud_sync/pull_challan_images",
+            headers={"X-API-KEY": api_key},
+            timeout=60
+        )
+        resp.raise_for_status()
+        cloud_images_map = resp.json().get("data", {})
+    except Exception as e:
+        print(f"Error pulling images from cloud: {e}")
+        return {"pulled": 0, "reason": str(e)}
+
+    from app import load_challan_images_map, save_challan_images_map, CHALLAN_IMAGES_DIR
+    os.makedirs(CHALLAN_IMAGES_DIR, exist_ok=True)
+    local_map = load_challan_images_map()
+    pulled_count = 0
+
+    for challan_no, cloud_imgs in cloud_images_map.items():
+        local_map.setdefault(challan_no, [])
+        local_ids = {str(i.get("id")) for i in local_map[challan_no]}
+        for img in cloud_imgs:
+            if str(img.get("id")) in local_ids:
+                continue
+            b64 = img.get("base64_data") or ""
+            if b64 and "base64," in b64:
+                try:
+                    header, encoded = b64.split("base64,", 1)
+                    data = base64.b64decode(encoded)
+                    filename = img.get("filename") or f"cloud_{img.get('id')}.jpg"
+                    filepath = os.path.join(CHALLAN_IMAGES_DIR, filename)
+                    if not os.path.exists(filepath):
+                        with open(filepath, "wb") as f:
+                            f.write(data)
+                except Exception as e:
+                    print(f"Error saving pulled image {img.get('filename')}: {e}")
+            local_map[challan_no].append(img)
+            pulled_count += 1
+
+    if pulled_count:
+        save_challan_images_map(local_map)
+    return {"pulled": pulled_count}
+
 def trigger_manual_sync(sql_settings, local_db):
-    """Triggers snapshot generation and saves local cloud_snapshot_latest.json file."""
+    """Full two-way sync:
+    1. Pull any images uploaded directly on the cloud (Render) app down to the PC.
+    2. Generate a fresh snapshot from the local SQL Server + merged images.
+    3. Save it locally and push it up to the cloud app.
+    """
+    cfg = load_cloud_sync_config()
+
+    pull_result = pull_new_images_from_cloud(cfg)
+    if pull_result.get("pulled"):
+        print(f"Pulled {pull_result['pulled']} new image(s) from cloud.")
+
     print("Generating complete ERP Snapshot...")
     snap = export_all_reports_snapshot(sql_settings, local_db)
     saved_path = save_local_snapshot_file(snap)
+
+    push_result = push_snapshot_to_cloud(snap, cfg)
+
     return {
         "status": "success",
-        "cloud_push_status": "Snapshot updated cleanly",
+        "cloud_push_status": "Pushed to cloud successfully" if push_result.get("pushed") else f"Push skipped/failed: {push_result.get('reason')}",
+        "images_pulled_from_cloud": pull_result.get("pulled", 0),
         "snapshot_path": saved_path,
         "sync_time": snap.get("sync_time")
     }

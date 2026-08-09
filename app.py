@@ -2775,6 +2775,8 @@ def api_folding_payment():
         "status": "success",
         "total_rows": len(data),
         "workers": sorted(list(workers_set)),
+        "from_snapshot": bool(is_cloud_mode() and snap),
+        "snapshot_time": snap.get("sync_time", "") if snap else "",
         "data": data
     })
 
@@ -2958,6 +2960,21 @@ def api_cloud_sync_push_snapshot():
         "message": "Snapshot successfully received and saved on Cloud server!",
         "sync_time": cfg["last_sync_time"]
     })
+
+@app.route("/api/cloud_sync/pull_challan_images", methods=["GET"])
+def api_cloud_sync_pull_challan_images():
+    """Lets the PC pull down any challan images uploaded directly on this cloud app,
+    so they survive Render's storage being wiped on the next deploy/restart."""
+    from cloud_sync_utils import load_cloud_sync_config
+    client_key = request.headers.get("X-API-KEY", "").strip()
+    cfg = load_cloud_sync_config()
+    expected_key = os.environ.get("CLOUD_API_KEY", cfg.get("api_key", "sknt_secure_sync_key_2026"))
+
+    if client_key != expected_key and expected_key != "":
+        return jsonify({"error": "Unauthorized sync key"}), 401
+
+    images_map = load_challan_images_map()
+    return jsonify({"status": "success", "data": images_map})
 
 @app.route("/api/cloud_sync/status", methods=["GET"])
 def api_cloud_sync_status():
