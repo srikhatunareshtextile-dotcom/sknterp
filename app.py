@@ -705,9 +705,12 @@ def api_upload_challan_image():
         file.save(filepath)
 
         rel_url = f"/static/uploads/challan_images/{filename}"
+        from cloud_sync_utils import create_base64_thumbnail
+        b64_url = create_base64_thumbnail(filepath)
         img_record = {
             "id": f"{timestamp}",
-            "url": rel_url,
+            "url": b64_url or rel_url,
+            "base64_data": b64_url or rel_url,
             "filename": filename,
             "uploaded_by": session.get("user_id", "user"),
             "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -871,6 +874,9 @@ def get_dashboard():
         except Exception as e:
             sql_server_msg = str(e).split('] ')[-1] # Clean ODBC error message
 
+    snap = load_cloud_snapshot()
+    sync_time = snap.get("sync_time", "") if snap else ""
+
     return jsonify({
         "sqlite_status": "Online" if sqlite_ok else "Offline",
         "sqlite_path": local_db,
@@ -881,7 +887,8 @@ def get_dashboard():
             "server": sql_settings.get("db_server", "localhost"),
             "database": sql_settings.get("db_name", "")
         },
-        "pyodbc_installed": pyodbc_installed
+        "pyodbc_installed": pyodbc_installed,
+        "last_sync_time": sync_time
     })
 
 def auto_populate_slip_items(local_db, slip_id, party, group_name=None):
@@ -2697,16 +2704,24 @@ def api_folding_payment():
             
             checking_info = (
                 ticks_map.get(key_checking_spec)
+                or ticks_map.get(f"{raw_no}_{worker_id}_{item_key}_CHECKING")
                 or ticks_map.get(f"{challan_no}_{worker_id}_{job_item_name}_seq{seq_idx}_CHECKING")
+                or ticks_map.get(f"{raw_no}_{worker_id}_{job_item_name}_seq{seq_idx}_CHECKING")
                 or (ticks_map.get(f"{challan_no}_{worker_id}_{job_item_name}_CHECKING") if seq_idx == 1 else None)
+                or (ticks_map.get(f"{raw_no}_{worker_id}_{job_item_name}_CHECKING") if seq_idx == 1 else None)
                 or (ticks_map.get(f"{challan_no}_{worker_id}_CHECKING") if seq_idx == 1 else None)
+                or (ticks_map.get(f"{raw_no}_{worker_id}_CHECKING") if seq_idx == 1 else None)
                 or {"is_paid": False, "paid_date": "", "paid_by": "", "done_pcs": 0.0}
             )
             charak_info = (
                 ticks_map.get(key_charak_spec)
+                or ticks_map.get(f"{raw_no}_{worker_id}_{item_key}_CHARAK")
                 or ticks_map.get(f"{challan_no}_{worker_id}_{job_item_name}_seq{seq_idx}_CHARAK")
+                or ticks_map.get(f"{raw_no}_{worker_id}_{job_item_name}_seq{seq_idx}_CHARAK")
                 or (ticks_map.get(f"{challan_no}_{worker_id}_{job_item_name}_CHARAK") if seq_idx == 1 else None)
+                or (ticks_map.get(f"{raw_no}_{worker_id}_{job_item_name}_CHARAK") if seq_idx == 1 else None)
                 or (ticks_map.get(f"{challan_no}_{worker_id}_CHARAK") if seq_idx == 1 else None)
+                or (ticks_map.get(f"{raw_no}_{worker_id}_CHARAK") if seq_idx == 1 else None)
                 or {"is_paid": False, "paid_date": "", "paid_by": "", "done_pcs": 0.0}
             )
 
@@ -2897,11 +2912,22 @@ def is_cloud_mode():
 def api_cloud_sync_manual_trigger():
     from cloud_sync_utils import trigger_manual_sync
     local_db, sql_settings = load_settings()
+
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        sync_time = snap.get("sync_time", datetime.now().strftime("%Y-%m-%d %H:%M:%S")) if snap else ""
+        return jsonify({
+            "status": "success",
+            "message": "Cloud App is active and running on live synced snapshot data.",
+            "sync_time": sync_time,
+            "cloud_mode": True
+        })
+
     try:
         res = trigger_manual_sync(sql_settings, local_db)
         return jsonify({
             "status": "success",
-            "message": "Manual sync completed! Fresh snapshot exported & pushed.",
+            "message": "Manual sync completed! Fresh ERP snapshot exported.",
             **res
         })
     except Exception as e:

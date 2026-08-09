@@ -1111,10 +1111,11 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                     calc_rfpcs = 0.0
                     calc_recpcs = recpcs_raw
 
+                total_returned = calc_rfpcs + plainpcs + calc_recpcs + spcs + secpcs + retpcs + shtpcs + wastepcs
                 if raw_balpcs > 0:
                     calc_balpcs = raw_balpcs
                 else:
-                    calc_balpcs = max(0.0, pcs - calc_rfpcs - plainpcs)
+                    calc_balpcs = max(0.0, pcs - total_returned)
 
                 stat_raw = str(r['Stat']).strip() if r['Stat'] else "P"
                 if stat_raw in ('C', 'CLOSE') and calc_balpcs <= 0 and raw_balpcs <= 0:
@@ -1155,7 +1156,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
         rows = open_rows + fr_parsed_rows
 
         if status == "Pending":
-            return [r for r in rows if r.get('is_opening') or r['stat'] == 'P']
+            return [r for r in rows if (r.get('is_opening') and r.get('balpcs', 0) > 0) or (r['stat'] == 'P' and r.get('balpcs', 0) > 0)]
         elif status == "Close":
             return [r for r in rows if r['stat'] == 'C']
         return rows
