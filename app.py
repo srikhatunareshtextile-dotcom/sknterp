@@ -2039,19 +2039,21 @@ def logo():
     return jsonify({"error": "Logo image not found"}), 404
 
 @app.route("/static/css/style.css")
-
 def serve_css():
     css_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "css", "style.css")
     if os.path.exists(css_p):
         return send_from_directory(os.path.dirname(css_p), "style.css", mimetype="text/css")
-    return "/* CSS embedded in template */", 200, {"Content-Type": "text/css"}
+    from embedded_static import STYLE_CSS_CONTENT
+    return STYLE_CSS_CONTENT, 200, {"Content-Type": "text/css; charset=utf-8"}
 
 @app.route("/static/js/main.js")
 def serve_js():
     js_p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "js", "main.js")
     if os.path.exists(js_p):
         return send_from_directory(os.path.dirname(js_p), "main.js", mimetype="application/javascript")
-    return "// JS fallback", 200, {"Content-Type": "application/javascript"}
+    from embedded_static import MAIN_JS_CONTENT
+    return MAIN_JS_CONTENT, 200, {"Content-Type": "application/javascript; charset=utf-8"}
+
 
 
 
