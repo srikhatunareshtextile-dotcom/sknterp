@@ -1365,10 +1365,17 @@ def slips():
     conn.close()
 
     result = [dict(r) for r in rows]
-    if not result and (is_cloud_mode() or try_import_pyodbc() is None):
+    if is_cloud_mode() or try_import_pyodbc() is None:
         snap = load_cloud_snapshot()
         if snap:
-            result = snap.get("reports", {}).get("packing_slips", [])
+            snap_slips = snap.get("reports", {}).get("packing_slips", [])
+            seen_ids = {str(s.get("id")) for s in result} | {str(s.get("slip_no")) for s in result}
+            for ss in snap_slips:
+                s_obj = ss.get("slip", ss) if isinstance(ss, dict) else dict(ss)
+                s_id = str(s_obj.get("id", s_obj.get("slip_no", "")))
+                if s_id not in seen_ids:
+                    result.append(s_obj)
+                    seen_ids.add(s_id)
     return jsonify(result)
 
 @app.route("/api/slips/<int:slip_id>", methods=["GET", "DELETE"])
@@ -1390,24 +1397,37 @@ def slip_detail(slip_id):
     c = conn.cursor()
     c.execute("SELECT * FROM packing_slips WHERE id = ?", (slip_id,))
     slip_row = c.fetchone()
-    if not slip_row:
+    
+    if slip_row:
+        c.execute("SELECT * FROM packing_slip_items WHERE slip_id = ? ORDER BY id ASC", (slip_id,))
+        item_rows = c.fetchall()
+        c.execute("SELECT name FROM pack_types ORDER BY name ASC")
+        pack_types = [r["name"] for r in c.fetchall()]
         conn.close()
-        return jsonify({"error": "Packing Slip not found"}), 404
-    
-    c.execute("SELECT * FROM packing_slip_items WHERE slip_id = ? ORDER BY id ASC", (slip_id,))
-    item_rows = c.fetchall()
-    
-    c.execute("SELECT name FROM pack_types ORDER BY name ASC")
-    pack_types = [r["name"] for r in c.fetchall()]
+        return jsonify({
+            "slip": dict(slip_row),
+            "items": [dict(i) for i in item_rows],
+            "pack_types": pack_types
+        })
+
     conn.close()
 
-    slip = dict(slip_row)
-    items = [dict(i) for i in item_rows]
-    return jsonify({
-        "slip": slip,
-        "items": items,
-        "pack_types": pack_types
-    })
+    # Cloud Snapshot Fallback for Slip Detail
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        if snap:
+            snap_slips = snap.get("reports", {}).get("packing_slips", [])
+            for ss in snap_slips:
+                s_dict = ss.get("slip", ss) if isinstance(ss, dict) else dict(ss)
+                s_id = str(s_dict.get("id", s_dict.get("slip_no", "")))
+                if s_id == str(slip_id) or str(s_dict.get("slip_no")) == str(slip_id):
+                    return jsonify({
+                        "slip": s_dict,
+                        "items": ss.get("items", []),
+                        "pack_types": ["BOX","BUNDLE","BAG","ROLL","PIECE","LOOSE","CARTOON","BALE","CASE","DRUM","PACKET","PAIR","SET","DOZEN"]
+                    })
+
+    return jsonify({"error": "Packing Slip not found"}), 404
 
 @app.route("/api/slips/<int:slip_id>/items", methods=["POST"])
 def add_slip_item(slip_id):
@@ -1921,16 +1941,31 @@ def get_all_stock_report():
 
 @app.route("/api/purchase_stock")
 def get_purchase_stock_report():
-    """Detailed Purchase Stock Report from CHALMAST + CHALDATA.
-    Returns individual purchase challan rows grouped by Party.
-    By default: shows only purchase challans (cm.Mode = 'FR', cd.InwType = 'PURCHASE' and cd.JobType = ''/NULL)
-    If show_rec_plain_pcs=true: also includes job work plain receive (cm.Mode = 'FR', cd.JobType = 'PLAIN' and cd.PlainPcs > 0)
-    Columns: date, serial, billno, party, lotno, itemname, cut, rate, pcs, retpcs, spcs, balpcs
-    """
     _, sql_settings = load_settings()
     pyodbc_mod = try_import_pyodbc()
+
+    # === CLOUD FALLBACK ===
     if pyodbc_mod is None or is_cloud_mode():
-        return jsonify({"rows": [], "message": "Purchase stock requires direct SQL Server connection. Not available in cloud mode.", "cloud_mode": True})
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify([])
+        raw_rows = snap.get("reports", {}).get("purchase_stock", [])
+        search_query = request.args.get("search", "").strip().upper()
+        status_filter = request.args.get("status", "pending").lower()
+        results = []
+        for r in raw_rows:
+            p = str(r.get("party", "") or "").strip().upper()
+            item = str(r.get("itemname", "") or "").strip().upper()
+            if search_query and (search_query not in p and search_query not in item):
+                continue
+            bal = float(r.get("balpcs", 0) or 0)
+            if status_filter == "pending" and bal <= 0:
+                continue
+            elif status_filter == "closed" and bal > 0:
+                continue
+            results.append(r)
+        return jsonify(results)
+    # === END CLOUD FALLBACK ===
 
     # Query parameters
     search_query = request.args.get("search", "").strip().upper()
@@ -2285,8 +2320,33 @@ def run_script():
 def api_bill_report():
     _, sql_settings = load_settings()
     pyodbc_installed = try_import_pyodbc() is not None
+
+    # === CLOUD FALLBACK ===
     if not pyodbc_installed or is_cloud_mode():
-        return jsonify({"rows": [], "message": "Bill report requires direct SQL Server connection. Not available in cloud mode.", "cloud_mode": True})
+        snap = load_cloud_snapshot()
+        if not snap:
+            return jsonify({"status": "success", "total_rows": 0, "total_pcs": 0, "total_amount": 0, "data": []})
+        raw_data = snap.get("reports", {}).get("bill_report", [])
+        party_name = request.args.get("party", "").strip().upper()
+        group_name = request.args.get("group", "").strip().upper()
+        data = []
+        for r in raw_data:
+            p = str(r.get("party", "") or "").strip().upper()
+            grp = str(r.get("group_name", r.get("item_name", "")) or "").strip().upper()
+            if party_name and party_name not in p:
+                continue
+            if group_name and group_name not in grp:
+                continue
+            data.append(r)
+        return jsonify({
+            "status": "success",
+            "total_rows": len(data),
+            "total_pcs": sum(float(r.get("pcs", 0) or 0) for r in data),
+            "total_amount": sum(float(r.get("amount", 0) or 0) for r in data),
+            "from_snapshot": True,
+            "data": data
+        })
+    # === END CLOUD FALLBACK ===
 
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
@@ -2652,9 +2712,10 @@ def api_folding_payment():
                 "charak_paid_by": charak_info["paid_by"]
             }
 
-            if status_filter == "Paid" and not (item_obj["checking_paid"] or item_obj["charak_paid"]):
+            sf_up = status_filter.upper()
+            if ("UNPAID" in sf_up or "PENDING" in sf_up) and (item_obj["checking_paid"] and item_obj["charak_paid"]):
                 continue
-            if status_filter == "Unpaid" and (item_obj["checking_paid"] and item_obj["charak_paid"]):
+            elif "PAID" in sf_up and "UNPAID" not in sf_up and not (item_obj["checking_paid"] or item_obj["charak_paid"]):
                 continue
 
             data.append(item_obj)
