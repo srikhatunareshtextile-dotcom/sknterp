@@ -1,0 +1,17 @@
+{
+  "name": "Sri Khatu Naresh Textile ERP Mobile",
+  "short_name": "SKNT Mobile",
+  "description": "Integrated Mobile ERP System for Sri Khatu Naresh Textile",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#121826",
+  "theme_color": "#1F3A3F",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
