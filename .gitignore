@@ -1,0 +1,9 @@
+*.exe
+*.old
+*.db
+*.log
+__pycache__/
+.env
+.vs/
+.idea/
+cloud_snapshot_latest.json

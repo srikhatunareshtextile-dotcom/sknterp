@@ -1,0 +1,86 @@
+[
+  {
+    "user_id": "admin",
+    "username": "admin",
+    "password": "Nit@9825",
+    "name": "Administrator",
+    "role": "Admin",
+    "allowed_tabs": [
+      "all"
+    ],
+    "last_login": "09/08/2026 11:25 AM"
+  },
+  {
+    "user_id": "supervisor",
+    "username": "supervisor",
+    "password": "super123",
+    "name": "Factory Supervisor",
+    "role": "Supervisor",
+    "allowed_tabs": [
+      "all"
+    ]
+  },
+  {
+    "user_id": "staff",
+    "username": "staff",
+    "password": "staff123",
+    "name": "Store Staff",
+    "role": "Staff",
+    "allowed_tabs": [
+      "home",
+      "slips",
+      "all-stock",
+      "job-issue"
+    ]
+  },
+  {
+    "user_id": "vinodp",
+    "username": "vinodp",
+    "password": "50168485",
+    "name": "VINOD P",
+    "role": "Supervisor",
+    "allowed_tabs": [
+      "all"
+    ],
+    "last_login": "08/08/2026 09:10 PM"
+  },
+  {
+    "user_id": "shivam",
+    "username": "shivam",
+    "password": "8140",
+    "name": "SHIVAM",
+    "role": "Staff",
+    "allowed_tabs": [
+      "home",
+      "slips",
+      "all-stock",
+      "job-issue"
+    ]
+  },
+  {
+    "user_id": "manjeet",
+    "username": "manjeet",
+    "password": "7079",
+    "name": "MANJEET",
+    "role": "Staff",
+    "allowed_tabs": [
+      "home",
+      "slips",
+      "all-stock",
+      "job-issue"
+    ]
+  },
+  {
+    "user_id": "abhishek",
+    "username": "abhishek",
+    "password": "9006",
+    "name": "ABHISHEK",
+    "role": "Staff",
+    "allowed_tabs": [
+      "home",
+      "slips",
+      "all-stock",
+      "job-issue"
+    ]
+  }
+]

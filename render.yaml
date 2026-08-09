@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: sknt-mobile-app
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4
+    envVars:
+      - key: CLOUD_MODE
+        value: "true"
+      - key: CLOUD_API_KEY
+        value: "sknt_secure_sync_key_2026"
