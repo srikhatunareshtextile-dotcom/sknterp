@@ -871,7 +871,7 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
         rows = open_rows + [parse_fi_row(r) for r in cur.fetchall()]
 
         if status == "Pending":
-            return [r for r in rows if r.get('is_opening') or r['stat'] == 'P']
+            return [r for r in rows if (r.get('is_opening') and r.get('balpcs', 0) > 0) or (r['stat'] == 'P' and r.get('balpcs', 0) > 0)]
         elif status == "Close":
             return [r for r in rows if r['stat'] == 'C']
         return rows

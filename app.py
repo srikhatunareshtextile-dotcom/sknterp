@@ -727,6 +727,36 @@ def api_upload_challan_image():
         "all_images": images_map[challan_no]
     })
 
+@app.route("/static/uploads/challan_images/<filename>")
+def serve_challan_image(filename):
+    filepath = os.path.join(CHALLAN_IMAGES_DIR, filename)
+    if os.path.exists(filepath):
+        return send_from_directory(CHALLAN_IMAGES_DIR, filename)
+
+    # Fallback: Serve binary image decoded from Base64 Data URL in cloud_snapshot_latest.json
+    snap = load_cloud_snapshot()
+    if snap and "images_map" in snap:
+        images_map = snap.get("images_map", {})
+        for cno, img_list in images_map.items():
+            for img in img_list:
+                if img.get("filename") == filename or filename in str(img.get("url", "")):
+                    b64 = img.get("base64_data") or img.get("url", "")
+                    if b64 and "base64," in b64:
+                        try:
+                            header, encoded = b64.split("base64,", 1)
+                            mime_type = "image/jpeg"
+                            if "data:image/png" in header:
+                                mime_type = "image/png"
+                            elif "data:image/webp" in header:
+                                mime_type = "image/webp"
+                            data = base64.b64decode(encoded)
+                            from flask import Response
+                            return Response(data, mimetype=mime_type)
+                        except Exception as e:
+                            print(f"Error serving base64 image: {e}")
+
+    return jsonify({"error": "Image file not found"}), 404
+
 @app.route("/api/challan/images/<challan_no>", methods=["GET"])
 @login_required
 def api_get_challan_images(challan_no):
@@ -2414,6 +2444,9 @@ def api_job_issue_report():
         data = []
         for ji in all_rows:
             if not include_opening and ji.get("is_opening"):
+                continue
+            bal = float(ji.get("balpcs", 0) or 0)
+            if status_filter.lower() in ["pending", "p"] and bal <= 0:
                 continue
             item_name = str(ji.get("itemname", "") or "").strip().upper()
             jbr = str(ji.get("jobber", "") or "").strip().upper()
