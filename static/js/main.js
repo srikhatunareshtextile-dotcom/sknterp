@@ -21,6 +21,112 @@ window.showSnapshotBanner = function(data) {
 };
 
 // ══════════════════════════════════════════════════════════════════════════
+// LOCAL DEVICE PHOTO BACKUP (IndexedDB) + AUTO-RECOVERY
+// Keeps a copy of every uploaded challan photo right on this phone/browser.
+// If Render's server storage resets (free-tier sleep/restart), this device
+// automatically re-uploads any photo missing from the server the next time
+// the app is opened here.
+// ══════════════════════════════════════════════════════════════════════════
+window.sknLocalPhotoDB = (function() {
+  const DB_NAME = 'sknt_local_photos';
+  const STORE = 'challan_photos';
+  let dbPromise = null;
+
+  function open() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE)) {
+          db.createObjectStore(STORE, { keyPath: 'local_key' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return dbPromise;
+  }
+
+  async function save(record) {
+    try {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(record);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) { console.warn('Local photo backup save failed:', e); return false; }
+  }
+
+  async function getAll() {
+    try {
+      const db = await open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) { console.warn('Local photo backup read failed:', e); return []; }
+  }
+
+  return { save, getAll };
+})();
+
+// Reads a File as base64 (for local backup before/alongside upload)
+function sknFileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Converts a base64 Data URL back into a File for re-upload
+function sknBase64ToFile(base64, filename) {
+  const [header, encoded] = base64.split('base64,');
+  const mime = (header.match(/data:(.*);/) || [, 'image/jpeg'])[1];
+  const bin = atob(encoded);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new File([arr], filename, { type: mime });
+}
+
+// Checks this phone's local backup against the server's current image map,
+// and silently re-uploads any photo the server has lost.
+window.sknReconcileLocalPhotos = async function(serverImagesMap) {
+  const localRecords = await window.sknLocalPhotoDB.getAll();
+  if (!localRecords.length) return;
+
+  const missing = localRecords.filter(rec => {
+    const serverList = serverImagesMap[rec.challan_no] || [];
+    return !serverList.some(img => String(img.id) === String(rec.image_id));
+  });
+  if (!missing.length) return;
+
+  console.log(`Recovering ${missing.length} photo(s) missing from server (uploaded again from this device)...`);
+  for (const rec of missing) {
+    try {
+      const file = sknBase64ToFile(rec.base64, rec.filename);
+      const formData = new FormData();
+      formData.append('challan_no', rec.challan_no);
+      formData.append('files', file);
+      const res = await fetch('/api/challan/upload_image', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!(res.ok && data.status === 'success')) {
+        console.warn('Auto-recovery upload failed for', rec.filename, data.error);
+      }
+    } catch (e) {
+      console.warn('Auto-recovery upload error for', rec.filename, e);
+    }
+  }
+  if (typeof loadAllChallanImagesMap === 'function') await loadAllChallanImagesMap();
+};
+
+// ══════════════════════════════════════════════════════════════════════════
 // BULLETPROOF GLOBAL TABLE VIEW & ZOOM ENGINE FOR ALL TABS
 // ══════════════════════════════════════════════════════════════════════════
 window.globalZoomStates = { as: 1.0, od: 1.0, ps: 1.0, req: 1.0, br: 1.0, oos: 1.0, ji: 1.0, jr: 1.0, fp: 1.0 };
@@ -4865,6 +4971,13 @@ window.loadAllChallanImagesMap = async function() {
     const data = await res.json();
     if (data.status === 'success') {
       window.allChallanImagesMap = data.data || {};
+      // Silently re-upload any photo this device has backed up locally
+      // but which the server no longer has (e.g. Render storage reset).
+      if (typeof window.sknReconcileLocalPhotos === 'function' && !window._sknReconcileInFlight) {
+        window._sknReconcileInFlight = true;
+        window.sknReconcileLocalPhotos(window.allChallanImagesMap)
+          .finally(() => { window._sknReconcileInFlight = false; });
+      }
     }
   } catch(e) {
     console.error('Failed to load all images map:', e);
@@ -5077,6 +5190,13 @@ document.addEventListener("DOMContentLoaded", () => {
         btnSubmit.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Uploading ${fileCount} photo(s)...`;
       }
 
+      const filesToUpload = [];
+      if (fileInput && fileInput.files && fileInput.files.length > 0) {
+        for (let i = 0; i < fileInput.files.length; i++) filesToUpload.push(fileInput.files[i]);
+      } else if (cameraInput && cameraInput.files && cameraInput.files[0]) {
+        filesToUpload.push(cameraInput.files[0]);
+      }
+
       try {
         const res = await fetch('/api/challan/upload_image', {
           method: 'POST',
@@ -5084,6 +5204,25 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         const data = await res.json();
         if (res.ok && data.status === 'success') {
+          // Backup each uploaded photo locally on this device (IndexedDB),
+          // so it can be auto-recovered later if Render's storage resets.
+          if (Array.isArray(data.images)) {
+            for (let i = 0; i < data.images.length; i++) {
+              const rec = data.images[i];
+              const srcFile = filesToUpload[i];
+              if (!srcFile) continue;
+              try {
+                const base64 = await sknFileToBase64(srcFile);
+                await window.sknLocalPhotoDB.save({
+                  local_key: `${challanNo}_${rec.id}`,
+                  challan_no: challanNo,
+                  image_id: rec.id,
+                  filename: rec.filename,
+                  base64: base64
+                });
+              } catch (e) { console.warn('Local backup save failed:', e); }
+            }
+          }
           formUploadImg.reset();
           if (fileNameDisplay) fileNameDisplay.textContent = '';
           if (btnSubmit) btnSubmit.style.display = 'none';
