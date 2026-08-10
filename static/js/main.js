@@ -99,9 +99,11 @@ function sknBase64ToFile(base64, filename) {
 }
 
 // Checks this phone's local backup against the server's current image map,
-// and silently re-uploads any photo the server has lost.
+// and silently re-uploads any photo the server has lost. Works for both
+// challan-level (keyed by challan_no) and group-level (keyed by group_name)
+// photo backups, distinguished by rec.photo_type.
 window.sknReconcileLocalPhotos = async function(serverImagesMap) {
-  const localRecords = await window.sknLocalPhotoDB.getAll();
+  const localRecords = (await window.sknLocalPhotoDB.getAll()).filter(r => r.photo_type !== 'group');
   if (!localRecords.length) return;
 
   const missing = localRecords.filter(rec => {
@@ -127,6 +129,35 @@ window.sknReconcileLocalPhotos = async function(serverImagesMap) {
     }
   }
   if (typeof loadAllChallanImagesMap === 'function') await loadAllChallanImagesMap();
+};
+
+window.sknReconcileLocalGroupPhotos = async function(serverGroupImagesMap) {
+  const localRecords = (await window.sknLocalPhotoDB.getAll()).filter(r => r.photo_type === 'group');
+  if (!localRecords.length) return;
+
+  const missing = localRecords.filter(rec => {
+    const serverList = serverGroupImagesMap[rec.group_name] || [];
+    return !serverList.some(img => String(img.id) === String(rec.image_id));
+  });
+  if (!missing.length) return;
+
+  console.log(`Recovering ${missing.length} group photo(s) missing from server (uploaded again from this device)...`);
+  for (const rec of missing) {
+    try {
+      const file = sknBase64ToFile(rec.base64, rec.filename);
+      const formData = new FormData();
+      formData.append('group_name', rec.group_name);
+      formData.append('files', file);
+      const res = await fetch('/api/group_photo/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!(res.ok && data.status === 'success')) {
+        console.warn('Auto-recovery upload failed for', rec.filename, data.error);
+      }
+    } catch (e) {
+      console.warn('Auto-recovery upload error for', rec.filename, e);
+    }
+  }
+  if (typeof loadAllGroupImagesMap === 'function') await loadAllGroupImagesMap();
 };
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2086,7 +2117,7 @@ function filterAndRenderAllStock() {
         }
         allOrderDetails = data;
         window.showSnapshotBanner(data);
-        loadItemChallanMap().finally(filterAndRenderOrderDetails);
+        filterAndRenderOrderDetails();
       })
       .catch(err => {
         listContainer.innerHTML = `<div class="empty-state"><p class="text-danger">Failed to connect to server</p></div>`;
@@ -2138,7 +2169,7 @@ function filterAndRenderAllStock() {
       card.innerHTML = `
         <div class="report-header-row">
           <div>
-            <span class="font-bold" style="font-size:15px; color:#0f172a;">${row.item_name}</span> ${renderInlineChallanPhoto(window.itemChallanMap[row.item_name.toUpperCase().trim()])}
+            <span class="font-bold" style="font-size:15px; color:#0f172a;">${row.item_name}</span> ${renderInlineGroupPhoto(row.group_name)}
             <div style="font-size:12px; color:#475569; margin-top:3px;">
               Ord No: <span class="font-bold" style="color:#1d4ed8;">${row.order_no}</span> | Date: <span style="color:#0f172a;">${row.order_date}</span>
             </div>
@@ -3213,7 +3244,7 @@ function filterAndRenderAllStock() {
             <td>${dateCell}</td>
             <td class="cell-party" style="font-weight:700; text-align:left;">${row.jobber}</td>
             <td style="font-weight:700; color:#1d4ed8;">${row.isssr}</td>
-            <td class="cell-item" style="text-align:left; font-weight:600;">${row.jobitem}</td>
+            <td class="cell-item" style="text-align:left; font-weight:600;">${row.jobitem} ${renderInlineGroupPhoto(row.jobitem)}</td>
             <td style="text-align:right; font-weight:700; color:#1d4ed8;">${row.pcs.toFixed(0)}</td>
             <td style="text-align:right;">${row.plainpcs.toFixed(0)}</td>
             <td style="text-align:right;">${isOpening ? '-' : '₹' + row.rate.toFixed(2)}</td>
@@ -3224,7 +3255,7 @@ function filterAndRenderAllStock() {
             <td style="text-align:right;">${row.wastepcs.toFixed(0)}</td>
             <td style="text-align:right;">${row.retpcs.toFixed(0)}</td>
             <td style="font-weight:600; color:#475569;">${row.purchase_bill_no || '-'}</td>
-            <td style="text-align:left;">${row.fabrics || row.itemname || '-'}</td>
+            <td style="text-align:left;">${row.fabrics || row.itemname || '-'} ${renderInlineGroupPhoto(row.fabrics)}</td>
             <td style="text-align:left; font-size:11px;">${row.agent || '-'}</td>
             <td style="text-align:center; font-size:11px;">${row.lotno || '-'}</td>
             <td style="text-align:center; font-size:11px; font-weight:600;">${row.series || '-'}</td>
@@ -3272,7 +3303,7 @@ function filterAndRenderAllStock() {
           </div>
 
 
-          <div style="font-size:13px; font-weight:700; color:#1d4ed8; margin-bottom:6px;">${row.jobitem} ${row.fabrics ? '(' + row.fabrics + ')' : ''}</div>
+          <div style="font-size:13px; font-weight:700; color:#1d4ed8; margin-bottom:6px;">${row.jobitem} ${row.fabrics ? '(' + row.fabrics + ')' : ''} ${renderInlineGroupPhoto(row.fabrics)}</div>
           <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px; font-size:12px; background:#f8fafc; padding:8px; border-radius:6px; margin-bottom:6px;">
             <div><span style="color:#64748b; font-size:10px; display:block;">PCS</span><strong style="color:#1d4ed8;">${row.pcs.toFixed(0)}</strong></div>
             <div><span style="color:#64748b; font-size:10px; display:block;">REC PCS</span><strong style="color:#047857;">${row.recpcs.toFixed(0)}</strong></div>
@@ -4328,7 +4359,7 @@ function renderFoldingPaymentTable() {
           <strong>${r.challan_no}</strong> ${renderInlineChallanPhoto(r.challan_no)}
         </td>
         <td>${r.worker_name}</td>
-        <td><strong>${r.job_item_name || '-'}</strong></td>
+        <td><strong>${r.job_item_name || '-'}</strong> ${renderInlineGroupPhoto(r.job_item_name)}</td>
         <td>${r.iss_date || '-'}</td>
         <td style="text-align:right; font-weight:700; color:#1d4ed8; vertical-align:middle;">${(r.pcs || 0).toLocaleString()}</td>
         
@@ -5003,6 +5034,50 @@ window.loadItemChallanMap = async function() {
 };
 function loadItemChallanMap() { return window.loadItemChallanMap(); }
 
+// --- Global GROUP Photo Store & Helpers (matched by group_name, not tied to
+// one specific challan - so a photo uploaded from Orders / Job Issue /
+// Reprocess shows up everywhere else that group appears) ---
+window.allGroupImagesMap = {};
+window.loadAllGroupImagesMap = async function() {
+  try {
+    const res = await fetch('/api/group_photo/all_images_map');
+    const data = await res.json();
+    if (data.status === 'success') {
+      window.allGroupImagesMap = data.data || {};
+      if (typeof window.sknReconcileLocalGroupPhotos === 'function' && !window._sknReconcileGroupInFlight) {
+        window._sknReconcileGroupInFlight = true;
+        window.sknReconcileLocalGroupPhotos(window.allGroupImagesMap)
+          .finally(() => { window._sknReconcileGroupInFlight = false; });
+      }
+    }
+  } catch (e) { console.error('Failed to load group images map:', e); }
+};
+loadAllGroupImagesMap();
+
+// Same look as renderInlineChallanPhoto, but always offers an upload button
+// (even with no photo yet) since a group always exists, unlike a challan.
+window.renderInlineGroupPhoto = function(groupName) {
+  if (!groupName) return '';
+  const grp = String(groupName).trim().toUpperCase();
+  const images = window.allGroupImagesMap[grp] || [];
+
+  if (images.length > 0) {
+    const firstImg = images[0];
+    return `
+      <div class="inline-photo-cell" style="display:inline-flex; align-items:center; justify-content:center; position:relative; vertical-align:middle;">
+        <img src="${firstImg.url}" alt="Group Photo" onclick="viewFullPhoto('${firstImg.url}')" style="width:52px; height:52px; object-fit:cover; border-radius:8px; border:2px solid #22c55e; cursor:pointer; box-shadow:0 3px 8px rgba(0,0,0,0.3); transition:transform 0.2s;" title="Click to view full photo" onmouseover="this.style.transform='scale(1.15)'" onmouseout="this.style.transform='scale(1)'">
+        <span class="badge" onclick="openGroupImageModal('${grp}')" style="position:absolute; top:-4px; right:-6px; background:#22c55e; color:#0f172a; font-size:9px; padding:1px 5px; border-radius:10px; font-weight:800; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.4);">${images.length > 1 ? '+' + (images.length - 1) : '✎'}</span>
+      </div>
+    `;
+  } else {
+    return `
+      <button type="button" class="btn btn-sm btn-secondary" onclick="openGroupImageModal('${grp}')" title="Attach Group Photo / Camera" style="padding:4px 8px; font-size:11px; font-weight:600;">
+        <i class="fa-solid fa-camera" style="color:#22c55e;"></i> +Photo
+      </button>
+    `;
+  }
+};
+
 window.renderInlineChallanPhoto = function(challanNo) {
   if (!challanNo) return '';
   const cno = String(challanNo).trim().toUpperCase();
@@ -5030,15 +5105,20 @@ window.renderInlineChallanPhoto = function(challanNo) {
 loadAllChallanImagesMap();
 
 // --- Challan Photo Management ---
+window.currentPhotoModalMode = 'challan'; // 'challan' or 'group'
+
 window.openChallanImageModal = function(challanNo) {
+  window.currentPhotoModalMode = 'challan';
   const modal = document.getElementById('modal-challan-image');
   const titleNo = document.getElementById('modal-challan-title-no');
+  const titleLabel = document.getElementById('modal-photo-title-label');
   const inputChallanNo = document.getElementById('upload-challan-no');
   const fileNameDisplay = document.getElementById('selected-file-name');
   const btnSubmit = document.getElementById('btn-submit-upload-image');
   const fileInput = document.getElementById('challan-image-file-input');
   const cameraInput = document.getElementById('challan-camera-input');
 
+  if (titleLabel) titleLabel.textContent = 'Challan Photos';
   if (titleNo) titleNo.textContent = challanNo;
   if (inputChallanNo) inputChallanNo.value = challanNo;
   if (fileNameDisplay) fileNameDisplay.textContent = '';
@@ -5048,6 +5128,32 @@ window.openChallanImageModal = function(challanNo) {
 
   if (modal) modal.style.display = 'flex';
   loadChallanPhotos(challanNo);
+};
+
+// Same modal, reused for GROUP-level photos (matched by group name, not one
+// specific challan) - so uploading from Orders / Job Issue / Reprocess all
+// share the same photo, wherever that group appears.
+window.openGroupImageModal = function(groupName) {
+  window.currentPhotoModalMode = 'group';
+  const modal = document.getElementById('modal-challan-image');
+  const titleNo = document.getElementById('modal-challan-title-no');
+  const titleLabel = document.getElementById('modal-photo-title-label');
+  const inputChallanNo = document.getElementById('upload-challan-no');
+  const fileNameDisplay = document.getElementById('selected-file-name');
+  const btnSubmit = document.getElementById('btn-submit-upload-image');
+  const fileInput = document.getElementById('challan-image-file-input');
+  const cameraInput = document.getElementById('challan-camera-input');
+
+  if (titleLabel) titleLabel.textContent = 'Group Photos';
+  if (titleNo) titleNo.textContent = groupName;
+  if (inputChallanNo) inputChallanNo.value = groupName;
+  if (fileNameDisplay) fileNameDisplay.textContent = '';
+  if (btnSubmit) btnSubmit.style.display = 'none';
+  if (fileInput) fileInput.value = '';
+  if (cameraInput) cameraInput.value = '';
+
+  if (modal) modal.style.display = 'flex';
+  loadGroupPhotos(groupName);
 };
 
 window.loadChallanPhotos = async function(challanNo) {
@@ -5107,6 +5213,63 @@ window.deleteChallanPhoto = async function(challanNo, imageId) {
     if (res.ok && data.status === 'success') {
       await loadAllChallanImagesMap();
       loadChallanPhotos(challanNo);
+    } else {
+      alert('Error: ' + (data.error || 'Failed to delete photo'));
+    }
+  } catch (err) {
+    alert('Server error: ' + err);
+  }
+};
+
+// --- Group-level Photo Management (same modal/gallery, group_photo endpoints) ---
+window.loadGroupPhotos = async function(groupName) {
+  const container = document.getElementById('challan-photos-container');
+  if (!container) return;
+
+  container.innerHTML = '<div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading photos...</div>';
+
+  try {
+    const res = await fetch(`/api/group_photo/images/${encodeURIComponent(groupName)}`);
+    const data = await res.json();
+
+    if (data.status === 'success' && Array.isArray(data.images)) {
+      if (data.images.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="grid-column: 1/-1; padding:20px; text-align:center; color:var(--text-sub);"><i class="fa-solid fa-image" style="font-size:28px; margin-bottom:6px;"></i><p style="font-size:12px;">Is Group ke liye koi photo attached nahi hai</p></div>';
+        return;
+      }
+      let html = '';
+      data.images.forEach(img => {
+        html += `
+          <div class="photo-card" style="position:relative; background:var(--bg-card); border:1px solid var(--bg-card-border); border-radius:10px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+            <img src="${img.url}" alt="Group Photo" onclick="viewFullPhoto('${img.url}')" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;">
+            <div style="padding:6px 8px; font-size:10px; display:flex; justify-content:space-between; align-items:center; background:var(--bg-app);">
+              <span style="color:var(--text-sub); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px;" title="${img.uploaded_at}">${img.uploaded_at ? img.uploaded_at.split(' ')[0] : 'Photo'}</span>
+              <button type="button" onclick="deleteGroupPhoto('${groupName}', '${img.id}')" title="Delete Photo" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:12px; padding:2px;"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    } else {
+      container.innerHTML = `<div class="empty-state" style="grid-column: 1/-1; color:#ef4444;">${data.error || 'Failed to load photos'}</div>`;
+    }
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state" style="grid-column: 1/-1; color:#ef4444;">Error loading photos</div>';
+  }
+};
+
+window.deleteGroupPhoto = async function(groupName, imageId) {
+  if (!confirm('Pakka ye photo delete karni hai?')) return;
+  try {
+    const res = await fetch('/api/group_photo/delete_image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_name: groupName, image_id: imageId })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      await loadAllGroupImagesMap();
+      loadGroupPhotos(groupName);
     } else {
       alert('Error: ' + (data.error || 'Failed to delete photo'));
     }
@@ -5184,9 +5347,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (formUploadImg) {
     formUploadImg.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const challanNo = document.getElementById('upload-challan-no').value;
+      const isGroupMode = window.currentPhotoModalMode === 'group';
+      const keyValue = document.getElementById('upload-challan-no').value;
       const formData = new FormData();
-      formData.append('challan_no', challanNo);
+      formData.append(isGroupMode ? 'group_name' : 'challan_no', keyValue);
 
       let fileCount = 0;
       if (fileInput && fileInput.files && fileInput.files.length > 0) {
@@ -5199,7 +5363,7 @@ document.addEventListener("DOMContentLoaded", () => {
         fileCount++;
       }
 
-      if (!challanNo || fileCount === 0) {
+      if (!keyValue || fileCount === 0) {
         alert('Please select or capture at least one image file');
         return;
       }
@@ -5216,8 +5380,10 @@ document.addEventListener("DOMContentLoaded", () => {
         filesToUpload.push(cameraInput.files[0]);
       }
 
+      const uploadUrl = isGroupMode ? '/api/group_photo/upload' : '/api/challan/upload_image';
+
       try {
-        const res = await fetch('/api/challan/upload_image', {
+        const res = await fetch(uploadUrl, {
           method: 'POST',
           body: formData
         });
@@ -5232,9 +5398,16 @@ document.addEventListener("DOMContentLoaded", () => {
               if (!srcFile) continue;
               try {
                 const base64 = await sknFileToBase64(srcFile);
-                await window.sknLocalPhotoDB.save({
-                  local_key: `${challanNo}_${rec.id}`,
-                  challan_no: challanNo,
+                await window.sknLocalPhotoDB.save(isGroupMode ? {
+                  local_key: `group_${keyValue}_${rec.id}`,
+                  photo_type: 'group',
+                  group_name: keyValue,
+                  image_id: rec.id,
+                  filename: rec.filename,
+                  base64: base64
+                } : {
+                  local_key: `${keyValue}_${rec.id}`,
+                  challan_no: keyValue,
                   image_id: rec.id,
                   filename: rec.filename,
                   base64: base64
@@ -5245,8 +5418,13 @@ document.addEventListener("DOMContentLoaded", () => {
           formUploadImg.reset();
           if (fileNameDisplay) fileNameDisplay.textContent = '';
           if (btnSubmit) btnSubmit.style.display = 'none';
-          await loadAllChallanImagesMap();
-          loadChallanPhotos(challanNo);
+          if (isGroupMode) {
+            await loadAllGroupImagesMap();
+            loadGroupPhotos(keyValue);
+          } else {
+            await loadAllChallanImagesMap();
+            loadChallanPhotos(keyValue);
+          }
         } else {
           alert('Error: ' + (data.error || 'Failed to upload photo(s)'));
         }
