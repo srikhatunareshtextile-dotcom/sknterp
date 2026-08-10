@@ -34,13 +34,8 @@ def load_challan_images_map():
     if snap and "images_map" in snap:
         snap_map = snap.get("images_map", {})
         for k, v in snap_map.items():
-            existing_ids = {str(img.get("id")) for img in res.get(k, [])}
-            merged = list(res.get(k, []))
-            for img in v:
-                if str(img.get("id")) not in existing_ids:
-                    merged.append(img)
-                    existing_ids.add(str(img.get("id")))
-            res[k] = merged
+            if k not in res or not res[k]:
+                res[k] = v
     return res
 
 def save_challan_images_map(data_map):
@@ -50,41 +45,6 @@ def save_challan_images_map(data_map):
         return True
     except Exception as e:
         print(f"Error saving challan_images.json: {e}")
-
-# Group-level Photo Attachments (matched by GROUP NAME - not tied to any one challan,
-# so the same photo shows anywhere that group appears: Orders, Job Issue, Reprocess, etc.)
-GROUP_IMAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "group_images")
-GROUP_IMAGES_MAP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "group_images.json")
-os.makedirs(GROUP_IMAGES_DIR, exist_ok=True)
-
-def load_group_images_map():
-    res = {}
-    if os.path.exists(GROUP_IMAGES_MAP_FILE):
-        try:
-            with open(GROUP_IMAGES_MAP_FILE, "r") as f:
-                res = json.load(f)
-        except Exception as e:
-            print(f"Error loading group_images.json: {e}")
-    snap = load_cloud_snapshot()
-    if snap and "group_images_map" in snap:
-        for k, v in snap.get("group_images_map", {}).items():
-            existing_ids = {str(img.get("id")) for img in res.get(k, [])}
-            merged = list(res.get(k, []))
-            for img in v:
-                if str(img.get("id")) not in existing_ids:
-                    merged.append(img)
-                    existing_ids.add(str(img.get("id")))
-            res[k] = merged
-    return res
-
-def save_group_images_map(data_map):
-    try:
-        with open(GROUP_IMAGES_MAP_FILE, "w") as f:
-            json.dump(data_map, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"Error saving group_images.json: {e}")
-
 ACTIVITY_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "activity_log.json")
 
 def load_activity_logs():
@@ -866,143 +826,6 @@ def api_delete_challan_image():
         "remaining_count": len(remaining)
     })
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# GROUP-LEVEL PHOTOS — matched by GROUP NAME (not a specific challan), so a
-# photo uploaded from Orders, Job Issue, Reprocess etc. shows up everywhere
-# else that group appears, regardless of item-name spelling differences.
-# ══════════════════════════════════════════════════════════════════════════
-
-@app.route("/api/group_photo/upload", methods=["POST"])
-@login_required
-def api_upload_group_image():
-    files = request.files.getlist('files') or request.files.getlist('file')
-    if not files:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    group_name = str(request.form.get("group_name", "")).strip().upper()
-    if not group_name:
-        return jsonify({"error": "Group Name is required"}), 400
-
-    os.makedirs(GROUP_IMAGES_DIR, exist_ok=True)
-    images_map = load_group_images_map()
-    if group_name not in images_map or not isinstance(images_map[group_name], list):
-        images_map[group_name] = []
-
-    uploaded_records = []
-    for idx, file in enumerate(files):
-        if not file or file.filename == '':
-            continue
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
-            ext = '.jpg'
-        timestamp = int(datetime.now().timestamp() * 1000) + idx
-        clean_grp = "".join(c for c in group_name if c.isalnum() or c in ['-', '_'])
-        filename = f"group_{clean_grp}_{timestamp}{ext}"
-        filepath = os.path.join(GROUP_IMAGES_DIR, filename)
-        file.save(filepath)
-
-        rel_url = f"/static/uploads/group_images/{filename}"
-        from cloud_sync_utils import create_base64_thumbnail
-        b64_url = create_base64_thumbnail(filepath)
-        img_record = {
-            "id": f"{timestamp}",
-            "url": b64_url or rel_url,
-            "base64_data": b64_url or rel_url,
-            "filename": filename,
-            "uploaded_by": session.get("user_id", "user"),
-            "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        images_map[group_name].append(img_record)
-        uploaded_records.append(img_record)
-
-    if not uploaded_records:
-        return jsonify({"error": "No valid file selected"}), 400
-
-    save_group_images_map(images_map)
-    return jsonify({
-        "status": "success",
-        "message": f"{len(uploaded_records)} Photo(s) attached to Group {group_name}",
-        "images": uploaded_records,
-        "all_images": images_map[group_name]
-    })
-
-@app.route("/static/uploads/group_images/<filename>")
-def serve_group_image(filename):
-    filepath = os.path.join(GROUP_IMAGES_DIR, filename)
-    if os.path.exists(filepath):
-        return send_from_directory(GROUP_IMAGES_DIR, filename)
-    snap = load_cloud_snapshot()
-    if snap and "group_images_map" in snap:
-        for grp, img_list in snap.get("group_images_map", {}).items():
-            for img in img_list:
-                if img.get("filename") == filename or filename in str(img.get("url", "")):
-                    b64 = img.get("base64_data") or img.get("url", "")
-                    if b64 and "base64," in b64:
-                        try:
-                            header, encoded = b64.split("base64,", 1)
-                            mime_type = "image/jpeg"
-                            if "data:image/png" in header:
-                                mime_type = "image/png"
-                            elif "data:image/webp" in header:
-                                mime_type = "image/webp"
-                            data = base64.b64decode(encoded)
-                            from flask import Response
-                            return Response(data, mimetype=mime_type)
-                        except Exception as e:
-                            print(f"Error serving base64 group image: {e}")
-    return jsonify({"error": "Image file not found"}), 404
-
-@app.route("/api/group_photo/images/<group_name>", methods=["GET"])
-@login_required
-def api_get_group_images(group_name):
-    grp = str(group_name).strip().upper()
-    images_map = load_group_images_map()
-    images = images_map.get(grp, [])
-    return jsonify({"status": "success", "group_name": grp, "count": len(images), "images": images})
-
-@app.route("/api/group_photo/all_images_map", methods=["GET"])
-@login_required
-def api_get_all_group_images_map():
-    return jsonify({"status": "success", "data": load_group_images_map()})
-
-@app.route("/api/group_photo/delete_image", methods=["POST"])
-@login_required
-def api_delete_group_image():
-    data = request.json or {}
-    group_name = str(data.get("group_name", "")).strip().upper()
-    image_id = str(data.get("image_id", "")).strip()
-
-    if not group_name or not image_id:
-        return jsonify({"error": "Group Name and Image ID are required"}), 400
-
-    images_map = load_group_images_map()
-    if group_name not in images_map:
-        return jsonify({"error": "No images found for this Group"}), 404
-
-    target_img = None
-    remaining = []
-    for img in images_map[group_name]:
-        if str(img.get("id")) == image_id or img.get("filename") == image_id:
-            target_img = img
-        else:
-            remaining.append(img)
-
-    if not target_img:
-        return jsonify({"error": "Image record not found"}), 404
-
-    filename = target_img.get("filename")
-    if filename:
-        filepath = os.path.join(GROUP_IMAGES_DIR, filename)
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-            except Exception as e:
-                print(f"Notice: could not delete file {filepath}: {e}")
-
-    images_map[group_name] = remaining
-    save_group_images_map(images_map)
-    return jsonify({"status": "success", "message": f"Image removed for Group {group_name}", "remaining_count": len(remaining)})
 
 
 @app.route("/")
@@ -2756,6 +2579,17 @@ def api_job_reprocess_report():
                 continue
             if job_type and job_type.upper() != "ALL" and jtype != job_type.upper():
                 continue
+
+            # Filter by status: Pending vs Closed vs All
+            bal_val = float(rp.get("balpcs", 0) or 0)
+            stat_val = str(rp.get("stat", "")).strip().upper()
+            if status_filter.upper() == "PENDING":
+                if stat_val == "C" or bal_val <= 0:
+                    continue
+            elif status_filter.upper() in ("CLOSED", "CLOSE"):
+                if stat_val != "C" and bal_val > 0:
+                    continue
+
             data.append(rp)
         non_opening = [r for r in data if not r.get("is_opening")]
         def safe_sum(lst, key):
@@ -2835,10 +2669,18 @@ def api_folding_payment():
                 "paid_by": row[5] or "",
                 "done_pcs": float(row[6] or 0)
             }
-            if j_item:
-                ticks_map[f"{row[0]}_{row[1]}_{j_item}_{p_type}"] = val
-            if f"{row[0]}_{row[1]}_{p_type}" not in ticks_map:
-                ticks_map[f"{row[0]}_{row[1]}_{p_type}"] = val
+            ch_raw = str(row[0] or "").strip()
+            w_id = str(row[1] or "").strip()
+            raw_num = "".join([c for c in ch_raw if c.isdigit()])
+            ch_vars = {ch_raw}
+            if raw_num:
+                ch_vars.update({raw_num, f"WOP{raw_num}", f"WOPOP{raw_num}", f"RFOP{raw_num}", f"RF{raw_num}"})
+
+            for ch in ch_vars:
+                if j_item:
+                    ticks_map[f"{ch}_{w_id}_{j_item}_{p_type}"] = val
+                if f"{ch}_{w_id}_{p_type}" not in ticks_map:
+                    ticks_map[f"{ch}_{w_id}_{p_type}"] = val
         conn_local.close()
     except Exception as e:
         print(f"Error reading local folding payment ticks: {e}")
@@ -2852,15 +2694,21 @@ def api_folding_payment():
             w_id = tick.get("worker_id", "")
             p_type = str(tick.get("process_type", "CHARAK")).upper().strip()
             j_item = str(tick.get("job_item", "")).strip()
-            key1 = f"{ch_no}_{w_id}_{j_item}_{p_type}"
-            key2 = f"{ch_no}_{w_id}_{p_type}"
-            if key1 not in ticks_map and key2 not in ticks_map:
-                ticks_map[key1] = {
-                    "is_paid": bool(tick.get("is_paid", 0)),
-                    "paid_date": tick.get("paid_date", ""),
-                    "paid_by": tick.get("paid_by", ""),
-                    "done_pcs": float(tick.get("pcs", 0) or 0)
-                }
+            tick_val = {
+                "is_paid": bool(tick.get("is_paid", 0)),
+                "paid_date": tick.get("paid_date", ""),
+                "paid_by": tick.get("paid_by", ""),
+                "done_pcs": float(tick.get("pcs", 0) or 0)
+            }
+            raw_num = "".join([c for c in str(ch_no) if c.isdigit()])
+            ch_vars = {str(ch_no).strip()}
+            if raw_num:
+                ch_vars.update({raw_num, f"WOP{raw_num}", f"WOPOP{raw_num}", f"RFOP{raw_num}", f"RF{raw_num}"})
+            for ch in ch_vars:
+                if j_item:
+                    ticks_map[f"{ch}_{w_id}_{j_item}_{p_type}"] = tick_val
+                if f"{ch}_{w_id}_{p_type}" not in ticks_map:
+                    ticks_map[f"{ch}_{w_id}_{p_type}"] = tick_val
 
     # 2. Query Job Issue records from SQL Server (SELECT only)
     data = []
@@ -2875,13 +2723,10 @@ def api_folding_payment():
                     jbr = str(ji.get("jobber", "") or "").strip()
                     if worker_filter and worker_filter.upper() not in jbr.upper():
                         continue
-                    ch_raw = str(ji.get("isssr", "") or ji.get("challan_no", "")).strip()
-                    ser = str(ji.get("series", "") or "").strip()
-                    full_ch = f"{ser}{ch_raw}" if (ser and not ch_raw.upper().startswith(ser.upper())) else ch_raw
                     job_data.append({
-                        "series": ser,
-                        "iss_no": ch_raw,
-                        "challan_no": full_ch,
+                        "series": ji.get("series", ""),
+                        "iss_no": ji.get("isssr", ""),
+                        "challan_no": ji.get("isssr", ""),
                         "jobber": jbr,
                         "jobber_id": jbr,
                         "pcs": float(ji.get("pcs", 0) or 0),
@@ -3213,7 +3058,7 @@ def api_cloud_sync_pull_group_images():
     """Lets the PC pull down any group-level photos uploaded directly on this
     cloud app (via Orders/Job Issue/Reprocess), so they survive Render's
     storage being wiped on the next deploy/restart."""
-    from cloud_sync_utils import load_cloud_sync_config
+    from cloud_sync_utils import load_cloud_sync_config, create_base64_thumbnail, get_file_base64_fallback
     client_key = request.headers.get("X-API-KEY", "").strip()
     cfg = load_cloud_sync_config()
     expected_key = os.environ.get("CLOUD_API_KEY", cfg.get("api_key", "sknt_secure_sync_key_2026"))
@@ -3221,13 +3066,27 @@ def api_cloud_sync_pull_group_images():
         return jsonify({"error": "Unauthorized sync key"}), 401
 
     images_map = load_group_images_map()
-    return jsonify({"status": "success", "data": images_map})
+    processed_map = {}
+    for grp, img_list in images_map.items():
+        proc_list = []
+        for img in img_list:
+            item_copy = dict(img)
+            if not item_copy.get("base64_data"):
+                fname = item_copy.get("filename", "")
+                if fname:
+                    fpath = os.path.join(GROUP_IMAGES_DIR, fname)
+                    b64 = create_base64_thumbnail(fpath) or get_file_base64_fallback(fpath)
+                    if b64:
+                        item_copy["base64_data"] = b64
+            proc_list.append(item_copy)
+        processed_map[grp] = proc_list
+    return jsonify({"status": "success", "data": processed_map})
 
 @app.route("/api/cloud_sync/pull_challan_images", methods=["GET"])
 def api_cloud_sync_pull_challan_images():
     """Lets the PC pull down any challan images uploaded directly on this cloud app,
     so they survive Render's storage being wiped on the next deploy/restart."""
-    from cloud_sync_utils import load_cloud_sync_config
+    from cloud_sync_utils import load_cloud_sync_config, create_base64_thumbnail, get_file_base64_fallback
     client_key = request.headers.get("X-API-KEY", "").strip()
     cfg = load_cloud_sync_config()
     expected_key = os.environ.get("CLOUD_API_KEY", cfg.get("api_key", "sknt_secure_sync_key_2026"))
@@ -3236,7 +3095,21 @@ def api_cloud_sync_pull_challan_images():
         return jsonify({"error": "Unauthorized sync key"}), 401
 
     images_map = load_challan_images_map()
-    return jsonify({"status": "success", "data": images_map})
+    processed_map = {}
+    for cno, img_list in images_map.items():
+        proc_list = []
+        for img in img_list:
+            item_copy = dict(img)
+            if not item_copy.get("base64_data"):
+                fname = item_copy.get("filename", "")
+                if fname:
+                    fpath = os.path.join(CHALLAN_IMAGES_DIR, fname)
+                    b64 = create_base64_thumbnail(fpath) or get_file_base64_fallback(fpath)
+                    if b64:
+                        item_copy["base64_data"] = b64
+            proc_list.append(item_copy)
+        processed_map[cno] = proc_list
+    return jsonify({"status": "success", "data": processed_map})
 
 @app.route("/api/cloud_sync/status", methods=["GET"])
 def api_cloud_sync_status():
