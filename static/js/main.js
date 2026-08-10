@@ -2134,11 +2134,12 @@ function filterAndRenderAllStock() {
       card.className = "report-card";
       
       const badgeClass = row.status.toLowerCase() === "pending" ? "badge-oos" : "badge-available";
+      const photoHtml = renderInlineGroupPhoto(row.group_name) || renderInlineGroupPhoto(row.item_name) || renderInlineChallanPhoto(window.itemChallanMap[row.item_name.toUpperCase().trim()]);
       
       card.innerHTML = `
         <div class="report-header-row">
           <div>
-            <span class="font-bold" style="font-size:15px; color:#0f172a;">${row.item_name}</span> ${renderInlineChallanPhoto(window.itemChallanMap[row.item_name.toUpperCase().trim()])}
+            <span class="font-bold" style="font-size:15px; color:#0f172a;">${row.item_name}</span> ${photoHtml}
             <div style="font-size:12px; color:#475569; margin-top:3px;">
               Ord No: <span class="font-bold" style="color:#1d4ed8;">${row.order_no}</span> | Date: <span style="color:#0f172a;">${row.order_date}</span>
             </div>
@@ -2179,11 +2180,10 @@ function filterAndRenderAllStock() {
           <thead>
             <tr>
               <th style="width: 5%;">#</th>
+              <th style="width: 8%; text-align:center;">Photo</th>
               <th style="width: 15%;">Party</th>
-              <th style="width: 12%;">Order No</th>
+              <th style="width: 10%;">Order No</th>
               <th style="width: 10%;">Date</th>
-              <th style="width: 20%;">Item Name</th>
-              <th style="width: 10%;">Order Pcs</th>
               <th style="width: 10%;">Billed Pcs</th>
               <th style="width: 10%;">Balance Pcs</th>
               <th style="width: 8%;">Status</th>
