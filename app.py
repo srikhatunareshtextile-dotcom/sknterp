@@ -34,8 +34,13 @@ def load_challan_images_map():
     if snap and "images_map" in snap:
         snap_map = snap.get("images_map", {})
         for k, v in snap_map.items():
-            if k not in res or not res[k]:
-                res[k] = v
+            existing_ids = {str(img.get("id")) for img in res.get(k, [])}
+            merged = list(res.get(k, []))
+            for img in v:
+                if str(img.get("id")) not in existing_ids:
+                    merged.append(img)
+                    existing_ids.add(str(img.get("id")))
+            res[k] = merged
     return res
 
 def save_challan_images_map(data_map):
@@ -63,8 +68,13 @@ def load_group_images_map():
     snap = load_cloud_snapshot()
     if snap and "group_images_map" in snap:
         for k, v in snap.get("group_images_map", {}).items():
-            if k not in res or not res[k]:
-                res[k] = v
+            existing_ids = {str(img.get("id")) for img in res.get(k, [])}
+            merged = list(res.get(k, []))
+            for img in v:
+                if str(img.get("id")) not in existing_ids:
+                    merged.append(img)
+                    existing_ids.add(str(img.get("id")))
+            res[k] = merged
     return res
 
 def save_group_images_map(data_map):
