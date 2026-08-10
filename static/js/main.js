@@ -18,8 +18,8 @@ window.showSnapshotBanner = function(data) {
   }
   const banner = document.createElement('div');
   banner.id = 'snapshot-stale-banner';
-  banner.textContent = msg;
-  banner.style.cssText = 'position:sticky;top:0;z-index:9999;background:#fff3cd;color:#7a5b00;padding:8px 12px;font-size:13px;font-weight:600;text-align:center;border-bottom:1px solid #ffe08a;';
+  banner.style.cssText = 'position:relative;z-index:100;background:#fff3cd;color:#7a5b00;padding:6px 12px;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ffe08a;margin-bottom:6px;';
+  banner.innerHTML = `<span class="banner-text">${msg}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:#7a5b00;font-weight:bold;cursor:pointer;padding:0 4px;font-size:14px;">✕</button>`;
   document.body.insertBefore(banner, document.body.firstChild);
 };
 
@@ -4979,6 +4979,201 @@ function initThemeEngine() {
     if (theme === 'light') {
       document.documentElement.setAttribute('data-theme', 'light');
       document.body.setAttribute('data-theme', 'light');
+window.loadActivityLogs = loadActivityLogs;
+
+window.runWhatsAppChatImport = async function() {
+  if (!confirm("Start auto-matching and importing WhatsApp Chat photos (from 15/06/2026 onwards)?")) return;
+  try {
+    const res = await fetch('/api/whatsapp_import/run', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      alert(data.message);
+      if (typeof loadAllChallanImagesMap === 'function') loadAllChallanImagesMap();
+      if (typeof loadActivityLogs === 'function') loadActivityLogs();
+    } else {
+      alert('Import Error: ' + (data.error || 'Failed to import photos'));
+    }
+  } catch (err) {
+    alert('Server Error: ' + err);
+  }
+};
+
+window.updateUserRole = async function(userId, newRole) {
+  try {
+    const res = await fetch('/api/users/update_role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, role: newRole })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      alert(data.message);
+      loadAdminUserList();
+    } else {
+      alert('Error: ' + (data.error || 'Failed to update role'));
+      loadAdminUserList();
+    }
+  } catch (err) {
+    alert('Server error: ' + err);
+    loadAdminUserList();
+  }
+};
+
+
+window.openResetPasswordModal = function(userId, userName) {
+  const modal = document.getElementById('modal-reset-password');
+  const targetId = document.getElementById('reset-target-user-id');
+  const targetName = document.getElementById('reset-target-user-name');
+  const pwdInput = document.getElementById('reset-new-password');
+
+  if (targetId) targetId.value = userId;
+  if (targetName) targetName.textContent = `${userName} (${userId})`;
+  if (pwdInput) pwdInput.value = '';
+  if (modal) modal.style.display = 'flex';
+};
+
+window.deleteUserAccount = async function(userId) {
+  if (!confirm(`Pakka User '${userId}' ko delete karna hai?`)) return;
+
+  try {
+    const res = await fetch('/api/users/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      alert(data.message);
+      loadAdminUserList();
+    } else {
+      alert('Error: ' + (data.error || 'Failed to delete user'));
+    }
+  } catch (err) {
+    alert('Server error: ' + err);
+  }
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  initUserProfile();
+
+  // Change My Password Form
+  const formChangeMyPwd = document.getElementById('form-change-my-password');
+  if (formChangeMyPwd) {
+    formChangeMyPwd.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const oldPwd = document.getElementById('my-old-password').value;
+      const newPwd = document.getElementById('my-new-password').value;
+
+      try {
+        const res = await fetch('/api/users/change_password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          alert(data.message);
+          formChangeMyPwd.reset();
+        } else {
+          alert('Error: ' + (data.error || 'Password update failed'));
+        }
+      } catch (err) {
+        alert('Server error: ' + err);
+      }
+    });
+  }
+
+  // Open & Close Add User Modal
+  const btnOpenAddUser = document.getElementById('btn-open-add-user-modal');
+  const modalAddUser = document.getElementById('modal-add-user');
+  const closeAddUser = document.getElementById('modal-add-user-close');
+
+  if (btnOpenAddUser && modalAddUser) {
+    btnOpenAddUser.addEventListener('click', () => { modalAddUser.style.display = 'flex'; });
+  }
+  if (closeAddUser && modalAddUser) {
+    closeAddUser.addEventListener('click', () => { modalAddUser.style.display = 'none'; });
+  }
+
+  // Form Add User
+  const formAddUser = document.getElementById('form-add-user');
+  if (formAddUser) {
+    formAddUser.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const userId = document.getElementById('add-user-id').value.trim();
+      const name = document.getElementById('add-user-name').value.trim();
+      const password = document.getElementById('add-user-password').value;
+      const role = document.getElementById('add-user-role').value;
+
+      try {
+        const res = await fetch('/api/users/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, name: name, password: password, role: role })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          alert(data.message);
+          formAddUser.reset();
+          if (modalAddUser) modalAddUser.style.display = 'none';
+          loadAdminUserList();
+        } else {
+          alert('Error: ' + (data.error || 'Failed to add user'));
+        }
+      } catch (err) {
+        alert('Server error: ' + err);
+      }
+    });
+  }
+
+  // Reset Password Modal Close & Form
+  const modalResetPwd = document.getElementById('modal-reset-password');
+  const closeResetPwd = document.getElementById('modal-reset-password-close');
+  const formResetPwd = document.getElementById('form-reset-user-password');
+
+  if (closeResetPwd && modalResetPwd) {
+    closeResetPwd.addEventListener('click', () => { modalResetPwd.style.display = 'none'; });
+  }
+
+  if (formResetPwd) {
+    formResetPwd.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const targetUserId = document.getElementById('reset-target-user-id').value;
+      const newPwd = document.getElementById('reset-new-password').value;
+
+      try {
+        const res = await fetch('/api/users/change_password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: targetUserId, new_password: newPwd })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+          alert(data.message);
+          if (modalResetPwd) modalResetPwd.style.display = 'none';
+        } else {
+          alert('Error: ' + (data.error || 'Password reset failed'));
+        }
+      } catch (err) {
+        alert('Server error: ' + err);
+      }
+    });
+  }
+
+  // Initialize Theme Engine (Light / Dark Mode)
+  initThemeEngine();
+});
+
+// --- Theme Engine (Light / Dark Mode Switcher) ---
+function initThemeEngine() {
+  const btnThemeToggle = document.getElementById('btn-theme-toggle');
+  const themeIcon = document.getElementById('theme-icon');
+  const themeText = document.getElementById('theme-text');
+
+  function applyTheme(theme) {
+    if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.body.setAttribute('data-theme', 'light');
       if (themeIcon) { themeIcon.className = 'fa-solid fa-moon'; }
       if (themeText) { themeText.textContent = 'Dark Mode'; }
     } else {
@@ -5053,13 +5248,12 @@ window.loadAllGroupImagesMap = async function() {
   } catch (e) { console.error('Failed to load group images map:', e); }
 };
 loadAllGroupImagesMap();
+window.renderInlineGroupPhoto = renderInlineGroupPhoto;
 
-// Same look as renderInlineChallanPhoto, but always offers an upload button
-// (even with no photo yet) since a group always exists, unlike a challan.
-window.renderInlineGroupPhoto = function(groupName) {
+function renderInlineGroupPhoto(groupName) {
   if (!groupName) return '';
   const grp = String(groupName).trim().toUpperCase();
-  const images = window.allGroupImagesMap[grp] || [];
+  const images = (window.allGroupImagesMap && window.allGroupImagesMap[grp]) ? window.allGroupImagesMap[grp] : [];
 
   if (images.length > 0) {
     const firstImg = images[0];
