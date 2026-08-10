@@ -334,17 +334,77 @@ def pull_new_images_from_cloud(cfg):
         save_challan_images_map(local_map)
     return {"pulled": pulled_count}
 
+def pull_new_ticks_from_cloud(cfg, local_db):
+    """Render -> PC: fetches Charak/Folding ticks made directly on the cloud app
+    and merges them into the PC's local SQLite DB, so a tick made on a phone
+    (via Render) is never lost when Render's storage resets."""
+    cloud_url = (cfg.get("cloud_url") or "").strip().rstrip("/")
+    if not cloud_url:
+        return {"merged": 0, "reason": "cloud_url not set"}
+    api_key = cfg.get("api_key") or ""
+    try:
+        resp = requests.get(
+            f"{cloud_url}/api/cloud_sync/pull_charak_ticks",
+            headers={"X-API-KEY": api_key},
+            timeout=60
+        )
+        resp.raise_for_status()
+        cloud_ticks = resp.json().get("data", [])
+    except Exception as e:
+        print(f"Error pulling ticks from cloud: {e}")
+        return {"merged": 0, "reason": str(e)}
+
+    if not cloud_ticks:
+        return {"merged": 0}
+
+    merged = 0
+    conn = sqlite3.connect(local_db, timeout=30.0)
+    try:
+        c = conn.cursor()
+        for t in cloud_ticks:
+            c.execute(
+                "SELECT id, pcs, is_paid FROM folding_payment_ticks WHERE challan_no=? AND worker_id=? AND job_item=? AND process_type=?",
+                (t["challan_no"], t["worker_id"], t.get("job_item", ""), t.get("process_type", "CHARAK"))
+            )
+            row = c.fetchone()
+            if row is None:
+                c.execute("""
+                    INSERT INTO folding_payment_ticks (challan_no, worker_id, process_type, job_item, worker_name, pcs, is_paid, paid_date, paid_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (t["challan_no"], t["worker_id"], t.get("process_type", "CHARAK"), t.get("job_item", ""),
+                      t.get("worker_name", ""), t.get("pcs", 0), t.get("is_paid", 0), t.get("paid_date", ""), t.get("paid_by", "")))
+                merged += 1
+            elif float(t.get("pcs", 0) or 0) > float(row[1] or 0):
+                # Cloud has more progress on this tick than the PC does - keep the further-along one.
+                c.execute("""
+                    UPDATE folding_payment_ticks SET pcs=?, is_paid=?, paid_date=?, paid_by=?, worker_name=?
+                    WHERE id=?
+                """, (t.get("pcs", 0), t.get("is_paid", 0), t.get("paid_date", ""), t.get("paid_by", ""), t.get("worker_name", ""), row[0]))
+                merged += 1
+        conn.commit()
+    except Exception as e:
+        print(f"Error merging ticks from cloud: {e}")
+    finally:
+        conn.close()
+
+    return {"merged": merged}
+
 def trigger_manual_sync(sql_settings, local_db):
     """Full two-way sync:
     1. Pull any images uploaded directly on the cloud (Render) app down to the PC.
-    2. Generate a fresh snapshot from the local SQL Server + merged images.
-    3. Save it locally and push it up to the cloud app.
+    2. Pull any Charak/Folding ticks made directly on the cloud app into the PC's local DB.
+    3. Generate a fresh snapshot from the local SQL Server + merged images/ticks.
+    4. Save it locally and push it up to the cloud app.
     """
     cfg = load_cloud_sync_config()
 
     pull_result = pull_new_images_from_cloud(cfg)
     if pull_result.get("pulled"):
         print(f"Pulled {pull_result['pulled']} new image(s) from cloud.")
+
+    ticks_result = pull_new_ticks_from_cloud(cfg, local_db)
+    if ticks_result.get("merged"):
+        print(f"Merged {ticks_result['merged']} Charak/Folding tick(s) from cloud.")
 
     print("Generating complete ERP Snapshot...")
     snap = export_all_reports_snapshot(sql_settings, local_db)
@@ -356,6 +416,7 @@ def trigger_manual_sync(sql_settings, local_db):
         "status": "success",
         "cloud_push_status": "Pushed to cloud successfully" if push_result.get("pushed") else f"Push skipped/failed: {push_result.get('reason')}",
         "images_pulled_from_cloud": pull_result.get("pulled", 0),
+        "ticks_merged_from_cloud": ticks_result.get("merged", 0),
         "snapshot_path": saved_path,
         "sync_time": snap.get("sync_time")
     }

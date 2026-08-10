@@ -2000,6 +2000,8 @@ def get_purchase_stock_report():
                 continue
             elif status_filter == "closed" and bal > 0:
                 continue
+            r["from_snapshot"] = True
+            r["snapshot_time"] = snap.get("sync_time", "")
             results.append(r)
         return jsonify(results)
     # === END CLOUD FALLBACK ===
@@ -2244,6 +2246,8 @@ def get_order_details_endpoint():
                 continue
             if group_name and group_name not in grp:
                 continue
+            od["from_snapshot"] = True
+            od["snapshot_time"] = snap.get("sync_time", "")
             results.append(od)
         if sort_by == "date":
             results.sort(key=lambda x: str(x.get("order_date", "")))
@@ -2381,6 +2385,7 @@ def api_bill_report():
             "total_pcs": sum(float(r.get("pcs", 0) or 0) for r in data),
             "total_amount": sum(float(r.get("amount", 0) or 0) for r in data),
             "from_snapshot": True,
+            "snapshot_time": snap.get("sync_time", ""),
             "data": data
         })
     # === END CLOUD FALLBACK ===
@@ -2433,8 +2438,40 @@ def api_bill_report_filters():
     except Exception as e:
         return jsonify({"error": f"Failed to load filters: {e}"}), 500
 
+@app.route("/api/item_challan_map", methods=["GET"])
+def api_item_challan_map():
+    """Maps each item name to its most recent Job Issue challan number, so a
+    photo uploaded against that challan can be shown anywhere the item appears
+    (e.g. next to its group in the Orders report), matched purely by item name."""
+    _, sql_settings = load_settings()
+    try:
+        if is_cloud_mode() or try_import_pyodbc() is None:
+            snap = load_cloud_snapshot()
+            all_rows = snap.get("reports", {}).get("job_issue", []) if snap else []
+        else:
+            all_rows = query_job_issue_report(sql_settings, status="All")
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e), "data": {}}), 500
+
+    item_map = {}
+    item_dates = {}
+    all_images_map = load_challan_images_map()
+    for row in all_rows:
+        item_name = str(row.get("itemname", row.get("jobitem", "")) or "").strip().upper()
+        challan_no = str(row.get("isssr", row.get("issno", "")) or "").strip()
+        row_date = str(row.get("date", "") or "")
+        if not item_name or not challan_no:
+            continue
+        # Only has a photo attached if one was actually uploaded against this challan.
+        if not all_images_map.get(challan_no.upper(), []):
+            continue
+        if item_name not in item_dates or row_date > item_dates[item_name]:
+            item_dates[item_name] = row_date
+            item_map[item_name] = challan_no
+
+    return jsonify({"status": "success", "data": item_map})
+
 @app.route("/api/job_issue_report")
-@app.route("/api/reports/job_work_issue")
 def api_job_issue_report():
     _, sql_settings = load_settings()
     status_filter = request.args.get("status", "Pending").strip()
@@ -2960,6 +2997,36 @@ def api_cloud_sync_push_snapshot():
         "message": "Snapshot successfully received and saved on Cloud server!",
         "sync_time": cfg["last_sync_time"]
     })
+
+@app.route("/api/cloud_sync/pull_charak_ticks", methods=["GET"])
+def api_cloud_sync_pull_charak_ticks():
+    """Lets the PC pull down any Charak/Folding ticks made directly on this cloud
+    app's own local SQLite DB, so they reach the PC permanently before Render's
+    ephemeral storage can lose them on the next restart."""
+    from cloud_sync_utils import load_cloud_sync_config
+    client_key = request.headers.get("X-API-KEY", "").strip()
+    cfg = load_cloud_sync_config()
+    expected_key = os.environ.get("CLOUD_API_KEY", cfg.get("api_key", "sknt_secure_sync_key_2026"))
+    if client_key != expected_key and expected_key != "":
+        return jsonify({"error": "Unauthorized sync key"}), 401
+
+    local_db, _ = load_settings()
+    ticks = []
+    try:
+        conn = get_local_sqlite_connection(local_db)
+        c = conn.cursor()
+        c.execute("SELECT challan_no, worker_id, process_type, job_item, worker_name, pcs, is_paid, paid_date, paid_by FROM folding_payment_ticks")
+        for row in c.fetchall():
+            ticks.append({
+                "challan_no": row[0], "worker_id": row[1], "process_type": row[2],
+                "job_item": row[3], "worker_name": row[4], "pcs": row[5],
+                "is_paid": row[6], "paid_date": row[7], "paid_by": row[8]
+            })
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"status": "success", "data": ticks})
 
 @app.route("/api/cloud_sync/pull_challan_images", methods=["GET"])
 def api_cloud_sync_pull_challan_images():
