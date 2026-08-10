@@ -241,6 +241,25 @@ def export_all_reports_snapshot(sql_settings, local_db):
         processed_images_map[cno] = processed_list
     snapshot["images_map"] = processed_images_map
 
+    # 10. Group-level Images Map (matched by GROUP NAME, not tied to one challan)
+    from app import load_group_images_map, GROUP_IMAGES_DIR
+    raw_group_images_map = load_group_images_map()
+    processed_group_images_map = {}
+    for grp, img_list in raw_group_images_map.items():
+        processed_list = []
+        for img in img_list:
+            item_copy = dict(img)
+            fname = item_copy.get("filename", "")
+            if fname:
+                fpath = os.path.join(GROUP_IMAGES_DIR, fname)
+                b64_url = create_base64_thumbnail(fpath)
+                if b64_url:
+                    item_copy["base64_data"] = b64_url
+                    item_copy["url"] = b64_url
+            processed_list.append(item_copy)
+        processed_group_images_map[grp] = processed_list
+    snapshot["group_images_map"] = processed_group_images_map
+
     return snapshot
 
 def save_local_snapshot_file(snapshot):
@@ -334,6 +353,55 @@ def pull_new_images_from_cloud(cfg):
         save_challan_images_map(local_map)
     return {"pulled": pulled_count}
 
+def pull_new_group_images_from_cloud(cfg):
+    """Render -> PC: same as above, but for Group-level photos (uploaded from
+    Orders/Job Issue/Reprocess directly, not tied to a specific challan)."""
+    cloud_url = (cfg.get("cloud_url") or "").strip().rstrip("/")
+    if not cloud_url:
+        return {"pulled": 0, "reason": "cloud_url not set"}
+    api_key = cfg.get("api_key") or ""
+    try:
+        resp = requests.get(
+            f"{cloud_url}/api/cloud_sync/pull_group_images",
+            headers={"X-API-KEY": api_key},
+            timeout=60
+        )
+        resp.raise_for_status()
+        cloud_images_map = resp.json().get("data", {})
+    except Exception as e:
+        print(f"Error pulling group images from cloud: {e}")
+        return {"pulled": 0, "reason": str(e)}
+
+    from app import load_group_images_map, save_group_images_map, GROUP_IMAGES_DIR
+    os.makedirs(GROUP_IMAGES_DIR, exist_ok=True)
+    local_map = load_group_images_map()
+    pulled_count = 0
+
+    for group_name, cloud_imgs in cloud_images_map.items():
+        local_map.setdefault(group_name, [])
+        local_ids = {str(i.get("id")) for i in local_map[group_name]}
+        for img in cloud_imgs:
+            if str(img.get("id")) in local_ids:
+                continue
+            b64 = img.get("base64_data") or ""
+            if b64 and "base64," in b64:
+                try:
+                    header, encoded = b64.split("base64,", 1)
+                    data = base64.b64decode(encoded)
+                    filename = img.get("filename") or f"cloud_{img.get('id')}.jpg"
+                    filepath = os.path.join(GROUP_IMAGES_DIR, filename)
+                    if not os.path.exists(filepath):
+                        with open(filepath, "wb") as f:
+                            f.write(data)
+                except Exception as e:
+                    print(f"Error saving pulled group image {img.get('filename')}: {e}")
+            local_map[group_name].append(img)
+            pulled_count += 1
+
+    if pulled_count:
+        save_group_images_map(local_map)
+    return {"pulled": pulled_count}
+
 def pull_new_ticks_from_cloud(cfg, local_db):
     """Render -> PC: fetches Charak/Folding ticks made directly on the cloud app
     and merges them into the PC's local SQLite DB, so a tick made on a phone
@@ -402,6 +470,10 @@ def trigger_manual_sync(sql_settings, local_db):
     if pull_result.get("pulled"):
         print(f"Pulled {pull_result['pulled']} new image(s) from cloud.")
 
+    group_pull_result = pull_new_group_images_from_cloud(cfg)
+    if group_pull_result.get("pulled"):
+        print(f"Pulled {group_pull_result['pulled']} new group photo(s) from cloud.")
+
     ticks_result = pull_new_ticks_from_cloud(cfg, local_db)
     if ticks_result.get("merged"):
         print(f"Merged {ticks_result['merged']} Charak/Folding tick(s) from cloud.")
@@ -416,6 +488,7 @@ def trigger_manual_sync(sql_settings, local_db):
         "status": "success",
         "cloud_push_status": "Pushed to cloud successfully" if push_result.get("pushed") else f"Push skipped/failed: {push_result.get('reason')}",
         "images_pulled_from_cloud": pull_result.get("pulled", 0),
+        "group_photos_pulled_from_cloud": group_pull_result.get("pulled", 0),
         "ticks_merged_from_cloud": ticks_result.get("merged", 0),
         "snapshot_path": saved_path,
         "sync_time": snap.get("sync_time")
