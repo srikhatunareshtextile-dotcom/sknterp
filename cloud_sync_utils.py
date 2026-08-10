@@ -55,6 +55,18 @@ def create_base64_thumbnail(filepath, max_size=(600, 600), quality=75):
         print(f"Error converting image {filepath} to base64: {e}")
         return None
 
+def get_file_base64_fallback(filepath):
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, "rb") as f:
+            b64_str = base64.b64encode(f.read()).decode("utf-8")
+            ext = os.path.splitext(filepath)[1].lower().replace(".", "") or "jpeg"
+            if ext == "jpg": ext = "jpeg"
+            return f"data:image/{ext};base64,{b64_str}"
+    except Exception:
+        return None
+
 def export_all_reports_snapshot(sql_settings, local_db):
     """
     Exports clean snapshots of ALL ERP reports & images for Cloud storage:
@@ -170,26 +182,57 @@ def export_all_reports_snapshot(sql_settings, local_db):
         sql_conn = get_sql_server_connection(sql_settings)
         cur = sql_conn.cursor()
         q_pur = """
-            SELECT
-                cm.Date AS Date,
-                CONVERT(varchar, cm.Date, 103) AS chal_date,
-                cm.Serial,
-                ISNULL(cm.BillNo, '') AS BillNo,
-                cm.Party,
-                ISNULL(CAST(cd.LotNo AS varchar(50)), '') AS LotNo,
-                cd.ItemName,
-                ISNULL(cd.Cut, 0) AS Cut,
-                ISNULL(cd.Rate, 0) AS Rate,
-                ISNULL(cd.Pcs, 0) AS Pcs,
-                ISNULL(cd.RetPcs, 0) AS RetPcs,
-                ISNULL(cd.SecPcs, 0) AS SecPcs,
-                (ISNULL(cd.Pcs, 0) - ISNULL(cd.BillPcs, 0) - ISNULL(cd.RetPcs, 0) - ISNULL(cd.SecPcs, 0)) AS BalPcs,
-                'CHAL' AS source,
-                ISNULL(cm.Opening, 'N') AS Opening
-            FROM CHALDATA cd
-            JOIN CHALMAST cm ON cd.ControlId = cm.EntryId
-            WHERE cm.Mode = 'FR' AND cd.CompNo = 10 AND cd.ItemName IS NOT NULL AND cd.ItemName != ''
-            ORDER BY cm.Party, cm.Date, cm.Serial
+            SELECT * FROM (
+                -- PART 1: INWARD PURCHASE CHALLANS
+                SELECT
+                    cm.Date AS Date,
+                    CONVERT(varchar, cm.Date, 103) AS chal_date,
+                    cm.Serial,
+                    ISNULL(cm.BillNo, '') AS BillNo,
+                    cm.Party,
+                    ISNULL(CAST(cd.LotNo AS varchar(50)), '') AS LotNo,
+                    cd.ItemName,
+                    ISNULL(cd.Cut, 0) AS Cut,
+                    ISNULL(cd.Rate, 0) AS Rate,
+                    ISNULL(cd.Pcs, 0) AS Pcs,
+                    ISNULL(cd.RetPcs, 0) AS RetPcs,
+                    ISNULL(cd.SecPcs, 0) AS SecPcs,
+                    (ISNULL(cd.Pcs, 0) - ISNULL(cd.BillPcs, 0) - ISNULL(cd.RetPcs, 0) - ISNULL(cd.SecPcs, 0)) AS BalPcs,
+                    'CHAL' AS source,
+                    ISNULL(cm.Opening, 'N') AS Opening
+                FROM CHALDATA cd
+                JOIN CHALMAST cm ON cd.ControlId = cm.EntryId
+                WHERE cm.Mode = 'FR'
+                  AND cd.CompNo = 10
+                  AND cd.ItemName IS NOT NULL AND cd.ItemName != ''
+                  AND (cd.JobType IS NULL OR LTRIM(RTRIM(cd.JobType)) = '')
+
+                UNION ALL
+
+                -- PART 2: DIRECT PURCHASE BILLS
+                SELECT
+                    cm.Date AS Date,
+                    CONVERT(varchar, cm.Date, 103) AS chal_date,
+                    cm.Serial,
+                    ISNULL(cm.BillNo, '') AS BillNo,
+                    cm.Party,
+                    ISNULL(CAST(cd.LotNo AS varchar(50)), '') AS LotNo,
+                    cd.ItemName,
+                    ISNULL(cd.Cut, 0) AS Cut,
+                    ISNULL(cd.Rate, 0) AS Rate,
+                    ISNULL(cd.Pcs, 0) AS Pcs,
+                    ISNULL(cd.RetPcs, 0) AS RetPcs,
+                    ISNULL(cd.SPcs, 0) AS SecPcs,
+                    (ISNULL(cd.Pcs, 0) - ISNULL(cd.RetPcs, 0) - ISNULL(cd.SPcs, 0)) AS BalPcs,
+                    'BILL' AS source,
+                    ISNULL(cm.Opening, 'N') AS Opening
+                FROM BILLDATA cd
+                JOIN BILLMAST cm ON cd.ControlId = cm.EntryId
+                WHERE cm.Code = 'P'
+                  AND cd.CompNo IN (9, 10)
+                  AND cd.ItemName IS NOT NULL AND cd.ItemName != ''
+            ) AS combined
+            ORDER BY Party, Date, Serial
         """
         cur.execute(q_pur)
         pur_rows = []
@@ -233,7 +276,7 @@ def export_all_reports_snapshot(sql_settings, local_db):
             fname = item_copy.get("filename", "")
             if fname:
                 fpath = os.path.join(CHALLAN_IMAGES_DIR, fname)
-                b64_url = create_base64_thumbnail(fpath)
+                b64_url = create_base64_thumbnail(fpath) or get_file_base64_fallback(fpath)
                 if b64_url:
                     item_copy["base64_data"] = b64_url
                     item_copy["url"] = b64_url  # Directly use Data URL so rendering never fails!
@@ -252,7 +295,7 @@ def export_all_reports_snapshot(sql_settings, local_db):
             fname = item_copy.get("filename", "")
             if fname:
                 fpath = os.path.join(GROUP_IMAGES_DIR, fname)
-                b64_url = create_base64_thumbnail(fpath)
+                b64_url = create_base64_thumbnail(fpath) or get_file_base64_fallback(fpath)
                 if b64_url:
                     item_copy["base64_data"] = b64_url
                     item_copy["url"] = b64_url

@@ -2875,10 +2875,13 @@ def api_folding_payment():
                     jbr = str(ji.get("jobber", "") or "").strip()
                     if worker_filter and worker_filter.upper() not in jbr.upper():
                         continue
+                    ch_raw = str(ji.get("isssr", "") or ji.get("challan_no", "")).strip()
+                    ser = str(ji.get("series", "") or "").strip()
+                    full_ch = f"{ser}{ch_raw}" if (ser and not ch_raw.upper().startswith(ser.upper())) else ch_raw
                     job_data.append({
-                        "series": ji.get("series", ""),
-                        "iss_no": ji.get("isssr", ""),
-                        "challan_no": ji.get("isssr", ""),
+                        "series": ser,
+                        "iss_no": ch_raw,
+                        "challan_no": full_ch,
                         "jobber": jbr,
                         "jobber_id": jbr,
                         "pcs": float(ji.get("pcs", 0) or 0),
