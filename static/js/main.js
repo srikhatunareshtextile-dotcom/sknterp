@@ -4,11 +4,14 @@
 // ══════════════════════════════════════════════════════════════════════════
 window.showSnapshotBanner = function(data) {
   const existing = document.getElementById('snapshot-stale-banner');
-  if (!data || !data.from_snapshot || !data.snapshot_time) {
+  // Some report endpoints return an array (each row tagged with from_snapshot/snapshot_time)
+  // instead of a single object - normalize to check the first row in that case.
+  const info = Array.isArray(data) ? (data[0] || {}) : (data || {});
+  if (!info.from_snapshot || !info.snapshot_time) {
     if (existing) existing.remove();
     return;
   }
-  const msg = `⚠️ Cloud data as of ${data.snapshot_time} (local PC sync se pehle ka data ho sakta hai — PC pe "Manual Sync" chalayein)`;
+  const msg = `⚠️ Cloud data as of ${info.snapshot_time} (local PC sync se pehle ka data ho sakta hai — PC pe "Manual Sync" chalayein)`;
   if (existing) {
     existing.textContent = msg;
     return;
@@ -1154,6 +1157,7 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
         allReportData = data;
+        window.showSnapshotBanner(data);
         filterAndRenderReqReport();
       })
       .catch(err => {
@@ -1880,6 +1884,7 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
         allStockData = data;
+        window.showSnapshotBanner(data);
         filterAndRenderAllStock();
       })
       .catch(err => {
@@ -2080,7 +2085,8 @@ function filterAndRenderAllStock() {
           return;
         }
         allOrderDetails = data;
-        filterAndRenderOrderDetails();
+        window.showSnapshotBanner(data);
+        loadItemChallanMap().finally(filterAndRenderOrderDetails);
       })
       .catch(err => {
         listContainer.innerHTML = `<div class="empty-state"><p class="text-danger">Failed to connect to server</p></div>`;
@@ -2132,7 +2138,7 @@ function filterAndRenderAllStock() {
       card.innerHTML = `
         <div class="report-header-row">
           <div>
-            <span class="font-bold" style="font-size:15px; color:#0f172a;">${row.item_name}</span>
+            <span class="font-bold" style="font-size:15px; color:#0f172a;">${row.item_name}</span> ${renderInlineChallanPhoto(window.itemChallanMap[row.item_name.toUpperCase().trim()])}
             <div style="font-size:12px; color:#475569; margin-top:3px;">
               Ord No: <span class="font-bold" style="color:#1d4ed8;">${row.order_no}</span> | Date: <span style="color:#0f172a;">${row.order_date}</span>
             </div>
@@ -2412,6 +2418,7 @@ function filterAndRenderAllStock() {
           return;
         }
         allPurchaseStockData = data;
+        window.showSnapshotBanner(data);
         filterAndRenderPurchaseStock();
       })
       .catch(err => {
@@ -2673,6 +2680,7 @@ function filterAndRenderAllStock() {
 
       if (data.status === "success") {
         allBillReportData = data.data || [];
+        window.showSnapshotBanner(data);
         filterAndRenderBillReport();
       } else {
         brList.innerHTML = `<div class="empty-state" style="color:var(--danger);">${data.error || "Failed to load Sale Bill Data"}</div>`;
@@ -2971,6 +2979,7 @@ function filterAndRenderAllStock() {
         }
         if (data.status === "success") {
           allJobIssueData = data.data || [];
+          window.showSnapshotBanner(data);
           filterAndRenderJobIssue();
           const jiCard = document.getElementById("ji-filter-card") || document.getElementById("jobIssueReportCard");
           if (jiCard) jiCard.classList.add("collapsed");
@@ -4983,6 +4992,16 @@ window.loadAllChallanImagesMap = async function() {
     console.error('Failed to load all images map:', e);
   }
 };
+
+window.itemChallanMap = {};
+window.loadItemChallanMap = async function() {
+  try {
+    const res = await fetch('/api/item_challan_map');
+    const data = await res.json();
+    if (data.status === 'success') window.itemChallanMap = data.data || {};
+  } catch (e) { console.warn('Failed to load item-photo map:', e); }
+};
+function loadItemChallanMap() { return window.loadItemChallanMap(); }
 
 window.renderInlineChallanPhoto = function(challanNo) {
   if (!challanNo) return '';
