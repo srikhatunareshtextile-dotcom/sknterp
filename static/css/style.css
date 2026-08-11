@@ -2057,3 +2057,163 @@ body.dark-mode tr.paid-row {
   color: #ffffff;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* MOBILE-ONLY OVERRIDES (screens <= 768px)                                   */
+/* Desktop styles above are untouched - everything below only kicks in on     */
+/* small screens, and is purely additive/overriding, never removing rules.    */
+/* ══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* --- App shell breathing room --- */
+  .app-content {
+    padding: 10px;
+  }
+
+  .section-title, .view-title {
+    font-size: 16px;
+  }
+
+  /* --- Dashboard / action buttons: keep tap targets big and thumb-friendly --- */
+  .actions-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .action-btn {
+    padding: 12px 6px;
+  }
+
+  .action-btn i {
+    font-size: 20px;
+  }
+
+  .action-btn span {
+    font-size: 10px;
+  }
+
+  .card {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .card-value {
+    font-size: 17px;
+  }
+
+  /* --- Forms: stack to one column so labels/inputs never get squeezed --- */
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .form-group input, .form-group select, .form-group textarea {
+    font-size: 15px;   /* prevents iOS auto-zoom-on-focus, easier to read */
+    padding: 11px 10px;
+  }
+
+  .btn {
+    padding: 11px 16px;
+    font-size: 14px;
+  }
+
+  .search-bar {
+    height: 46px;
+  }
+
+  /* --- Modals: near-full-screen on small phones instead of a centered box --- */
+  .modal-content {
+    max-width: 100%;
+    width: 96%;
+    max-height: 94dvh;
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .modal-header h3 {
+    font-size: 15px;
+  }
+
+  /* --- Reports (br-table / print-table): the biggest pain point ---
+     Keep the table itself exactly as-is (same widths, same columns - so
+     nothing is hidden or re-arranged and the desktop logic stays identical),
+     but pin the first column while scrolling sideways, so you always know
+     which row/item you're looking at without scrolling back and forth. */
+  .br-report-table-wrapper,
+  [id$="-table-wrapper"],
+  .table-wrapper,
+  .table-scroll-container {
+    max-height: calc(100vh - 220px) !important;
+  }
+
+  .br-table td:first-child,
+  .print-table td:first-child {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 20 !important;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.25);
+  }
+
+  .br-table th:first-child,
+  .print-table th:first-child {
+    position: sticky !important;
+    left: 0 !important;
+    z-index: 60 !important;
+  }
+
+  [data-theme="light"] .br-table td:first-child,
+  [data-theme="light"] .print-table td:first-child {
+    background-color: #ffffff !important;
+  }
+  [data-theme="light"] .br-table tr:nth-child(even) td:first-child,
+  [data-theme="light"] .print-table tr:nth-child(even) td:first-child {
+    background-color: #f8fafc !important;
+  }
+  .br-table td:first-child,
+  .print-table td:first-child {
+    background-color: #ffffff !important;
+  }
+
+  /* One-time visible hint that a table scrolls sideways, so it's never
+     mistaken for "cut off" - fades out automatically. */
+  .br-report-table-wrapper::after,
+  [id$="-table-wrapper"]::after,
+  .table-wrapper::after {
+    content: "⇄ Swipe to see more";
+    position: sticky;
+    left: 0;
+    display: block;
+    width: fit-content;
+    margin: 4px 0 4px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+    background: rgba(100,116,139,0.12);
+    padding: 3px 8px;
+    border-radius: 6px;
+    pointer-events: none;
+  }
+
+  /* --- Inline photo thumbnails: slightly smaller so they don't dominate a
+     narrow table cell or card row --- */
+  .inline-photo-cell img {
+    width: 42px !important;
+    height: 42px !important;
+  }
+
+  /* --- Bottom nav: a touch more breathing room for thumbs --- */
+  .nav-item {
+    font-size: 9px;
+  }
+  .nav-item i {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 400px) {
+  /* Extra-small phones: trim actions grid to 2 columns so each tap target
+     stays comfortably large instead of shrinking further. */
+  .actions-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
