@@ -34,8 +34,33 @@ def load_challan_images_map():
     if snap and "images_map" in snap:
         snap_map = snap.get("images_map", {})
         for k, v in snap_map.items():
-            if k not in res or not res[k]:
-                res[k] = v
+            existing_ids = {str(img.get("id")) for img in res.get(k, [])}
+            merged = list(res.get(k, []))
+            for img in v:
+                if str(img.get("id")) not in existing_ids:
+                    merged.append(img)
+                    existing_ids.add(str(img.get("id")))
+            res[k] = merged
+
+    # Self-heal: any record still missing embedded base64 (e.g. saved before
+    # Pillow was available) whose actual file still exists on THIS machine
+    # gets upgraded and permanently saved, so it stops showing as broken.
+    changed = False
+    for k, img_list in res.items():
+        for img in img_list:
+            url_val = str(img.get("url", "") or "")
+            if "base64," not in url_val:
+                fname = img.get("filename", "")
+                fpath = os.path.join(CHALLAN_IMAGES_DIR, fname) if fname else ""
+                if fname and os.path.exists(fpath):
+                    from cloud_sync_utils import create_base64_thumbnail
+                    b64_url = create_base64_thumbnail(fpath)
+                    if b64_url:
+                        img["url"] = b64_url
+                        img["base64_data"] = b64_url
+                        changed = True
+    if changed:
+        save_challan_images_map(res)
     return res
 
 def save_challan_images_map(data_map):
@@ -45,6 +70,60 @@ def save_challan_images_map(data_map):
         return True
     except Exception as e:
         print(f"Error saving challan_images.json: {e}")
+
+# Group-level Photo Attachments
+GROUP_IMAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "group_images")
+GROUP_IMAGES_MAP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "group_images.json")
+os.makedirs(GROUP_IMAGES_DIR, exist_ok=True)
+
+def load_group_images_map():
+    res = {}
+    if os.path.exists(GROUP_IMAGES_MAP_FILE):
+        try:
+            with open(GROUP_IMAGES_MAP_FILE, "r") as f:
+                res = json.load(f)
+        except Exception as e:
+            print(f"Error loading group_images.json: {e}")
+    snap = load_cloud_snapshot()
+    if snap and "group_images_map" in snap:
+        snap_map = snap.get("group_images_map", {})
+        for k, v in snap_map.items():
+            existing_ids = {str(img.get("id")) for img in res.get(k, [])}
+            merged = list(res.get(k, []))
+            for img in v:
+                if str(img.get("id")) not in existing_ids:
+                    merged.append(img)
+                    existing_ids.add(str(img.get("id")))
+            res[k] = merged
+
+    # Self-heal: upgrade any record still missing embedded base64 whose actual
+    # file still exists on THIS machine, so it stops showing as broken.
+    changed = False
+    for k, img_list in res.items():
+        for img in img_list:
+            url_val = str(img.get("url", "") or "")
+            if "base64," not in url_val:
+                fname = img.get("filename", "")
+                fpath = os.path.join(GROUP_IMAGES_DIR, fname) if fname else ""
+                if fname and os.path.exists(fpath):
+                    from cloud_sync_utils import create_base64_thumbnail
+                    b64_url = create_base64_thumbnail(fpath)
+                    if b64_url:
+                        img["url"] = b64_url
+                        img["base64_data"] = b64_url
+                        changed = True
+    if changed:
+        save_group_images_map(res)
+    return res
+
+def save_group_images_map(data_map):
+    try:
+        with open(GROUP_IMAGES_MAP_FILE, "w") as f:
+            json.dump(data_map, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving group_images.json: {e}")
+
 ACTIVITY_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "activity_log.json")
 
 def load_activity_logs():
@@ -760,10 +839,12 @@ def serve_challan_image(filename):
 
     return jsonify({"error": "Image file not found"}), 404
 
-@app.route("/api/challan/images/<challan_no>", methods=["GET"])
-@login_required
-def api_get_challan_images(challan_no):
-    cno = str(challan_no).strip().upper()
+@app.route("/api/challan/images", methods=["GET"])
+@app.route("/api/challan/images/<path:challan_no>", methods=["GET"])
+def api_get_challan_images(challan_no=None):
+    if not challan_no:
+        challan_no = request.args.get("cno", request.args.get("challan_no", ""))
+    cno = str(challan_no or "").strip().upper()
     images_map = load_challan_images_map()
     images = images_map.get(cno, [])
     return jsonify({
@@ -3083,6 +3164,94 @@ def api_cloud_sync_pull_group_images():
     return jsonify({"status": "success", "data": processed_map})
 
 @app.route("/api/cloud_sync/pull_challan_images", methods=["GET"])
+
+@app.route("/api/group_photo/all_images_map", methods=["GET"])
+def api_get_all_group_images_map():
+    images_map = load_group_images_map()
+    return jsonify({"status": "success", "data": images_map})
+
+@app.route("/api/group_photo/upload_image", methods=["POST"])
+def api_upload_group_image():
+    group_name = request.form.get("group_name", "").strip().upper()
+    if not group_name:
+        return jsonify({"error": "Group name is required"}), 400
+    if "files" not in request.files:
+        return jsonify({"error": "No files attached"}), 400
+
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files selected"}), 400
+
+    images_map = load_group_images_map()
+    if group_name not in images_map or not isinstance(images_map[group_name], list):
+        images_map[group_name] = []
+
+    uploaded_files = []
+    for idx, file in enumerate(files):
+        if not file or file.filename == '':
+            continue
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]:
+            ext = ".jpg"
+
+        timestamp = int(datetime.now().timestamp() * 1000) + idx
+        clean_gname = "".join(c if (c.isalnum() or c in ['-', '_']) else '_' for c in group_name)
+        unique_name = f"group_{clean_gname}_{timestamp}{ext}"
+        file_path = os.path.join(GROUP_IMAGES_DIR, unique_name)
+        file.save(file_path)
+
+        from cloud_sync_utils import create_base64_thumbnail, get_file_base64_fallback
+        b64_url = create_base64_thumbnail(file_path) or get_file_base64_fallback(file_path)
+
+        img_record = {
+            "id": str(timestamp),
+            "group_name": group_name,
+            "filename": unique_name,
+            "url": f"/static/uploads/group_images/{unique_name}",
+            "base64_data": b64_url or "",
+            "upload_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        images_map[group_name].append(img_record)
+        uploaded_records = uploaded_files
+        uploaded_records.append(img_record)
+
+    save_group_images_map(images_map)
+    return jsonify({"status": "success", "message": f"{len(uploaded_files)} photo(s) uploaded successfully", "uploaded": uploaded_files})
+
+@app.route("/api/group_photo/delete_image", methods=["POST"])
+def api_delete_group_image():
+    payload = request.json or {}
+    group_name = str(payload.get("group_name", "")).strip().upper()
+    image_id = str(payload.get("image_id", "")).strip()
+
+    if not group_name or not image_id:
+        return jsonify({"error": "group_name and image_id required"}), 400
+
+    images_map = load_group_images_map()
+    if group_name not in images_map:
+        return jsonify({"error": "Group not found in photo map"}), 444
+
+    remaining = []
+    deleted = False
+    for img in images_map[group_name]:
+        if str(img.get("id")) == image_id:
+            deleted = True
+            fname = img.get("filename")
+            if fname:
+                fpath = os.path.join(GROUP_IMAGES_DIR, fname)
+                if os.path.exists(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception as e:
+                        print(f"Error removing group photo file: {e}")
+        else:
+            remaining.append(img)
+
+    images_map[group_name] = remaining
+    save_group_images_map(images_map)
+    return jsonify({"status": "success", "message": "Photo deleted successfully" if deleted else "Photo ID not found"})
+
+
 def api_cloud_sync_pull_challan_images():
     """Lets the PC pull down any challan images uploaded directly on this cloud app,
     so they survive Render's storage being wiped on the next deploy/restart."""

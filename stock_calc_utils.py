@@ -260,13 +260,12 @@ def get_shared_stock_data(sql_settings, include_opening=False, conn=None, item_t
 
     Q_JOB_REPROCESS = f"""
     SELECT UPPER(LTRIM(RTRIM(ISNULL(i.GroupName, '')))) AS group_name,
-        SUM(CASE WHEN c.Mode='FR' AND c.JobType='JOB'
-                 AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='')
+        SUM(CASE WHEN c.Mode='FR'
                  THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
                            - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
                            - ISNULL(c.WastePcs,0)
                  ELSE 0 END)
-      - SUM(CASE WHEN c.Mode='FI' AND c.SrChr='R'
+      - SUM(CASE WHEN c.Mode='FI' AND (c.SrChr='R' OR c.SrChr LIKE '%R%')
                  THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
                            - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
                            - ISNULL(c.WastePcs,0)
@@ -276,13 +275,12 @@ def get_shared_stock_data(sql_settings, include_opening=False, conn=None, item_t
     WHERE c.JobItem IS NOT NULL AND c.JobItem != ''
       AND c.Mode IN ('FI','FR')
     GROUP BY UPPER(LTRIM(RTRIM(ISNULL(i.GroupName, ''))))
-    HAVING SUM(CASE WHEN c.Mode='FR' AND c.JobType='JOB'
-                    AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='')
+    HAVING SUM(CASE WHEN c.Mode='FR'
                     THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
                               - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
                               - ISNULL(c.WastePcs,0)
                     ELSE 0 END)
-         - SUM(CASE WHEN c.Mode='FI' AND c.SrChr='R'
+         - SUM(CASE WHEN c.Mode='FI' AND (c.SrChr='R' OR c.SrChr LIKE '%R%')
                     THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
                               - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
                               - ISNULL(c.WastePcs,0)
@@ -720,7 +718,7 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
             params.extend([st, st, st])
 
         df_parsed = _parse_date_param(date_from)
-        if df_parsed:
+        if df_parsed and not include_opening:
             select_part += " AND cm.Date >= ?"
             params.append(df_parsed)
 
@@ -768,18 +766,11 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
                 retpcs = fr_ret
                 rfpcs = fr_rf
 
-            stat = str(r[15]).strip() if r[15] else ("O" if is_opening else "P")
+            # Status decided purely from the CALCULATED balance - not from the DB's
+            # own Stat column (r[15]), which may not always be kept up to date manually.
             total_returned = recpcs + secpcs + shtpcs + plainpcs + wastepcs + retpcs + rfpcs
-
-            if stat == 'C':
-                calc_balpcs = 0.0
-            else:
-                calc_balpcs = max(0.0, pcs - total_returned)
-                if calc_balpcs <= 0:
-                    stat = 'C'
-                    calc_balpcs = 0.0
-                else:
-                    stat = 'P'
+            calc_balpcs = max(0.0, pcs - total_returned)
+            stat = 'C' if calc_balpcs <= 0 else 'P'
 
             return {
                 "date": r[0] or "",
@@ -821,7 +812,7 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
                 JOIN CHALDATA cd ON cm.EntryId = cd.ControlId
                 WHERE cm.Mode = 'FI'
                 AND cm.Date < ?
-                AND (cd.Stat = 'P' OR cd.Stat = '' OR cd.Stat IS NULL OR cd.BalPcs > 0 OR (ISNULL(cd.Pcs,0) - (ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.WastePcs,0)+ISNULL(cd.RetPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RfPcs,0)+ISNULL(cd.SPcs,0))) > 0)
+                AND (ISNULL(cd.BalPcs,0) > 0 OR (ISNULL(cd.Pcs,0) - (ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.WastePcs,0)+ISNULL(cd.RetPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RfPcs,0)+ISNULL(cd.SPcs,0))) > 0)
             """
             open_params = [df_parsed]
             if inw_type and inw_type != "All":
@@ -834,7 +825,7 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
                 open_query += " AND (cd.JobItem LIKE ? OR cd.ItemName LIKE ? OR cd.GroupName LIKE ?)"
                 st = f"%{item.strip()}%"
                 open_params.extend([st, st, st])
-            open_query += " GROUP BY cm.Party, cd.JobItem, cd.ItemName, cd.GroupName HAVING SUM(CASE WHEN cd.Stat = 'C' THEN 0 ELSE CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.WastePcs,0)+ISNULL(cd.RetPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RfPcs,0)+ISNULL(cd.SPcs,0))) END END) <> 0 ORDER BY jobber, jobitem"
+            open_query += " GROUP BY cm.Party, cd.JobItem, cd.ItemName, cd.GroupName HAVING SUM(CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.WastePcs,0)+ISNULL(cd.RetPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RfPcs,0)+ISNULL(cd.SPcs,0))) END) <> 0 ORDER BY jobber, jobitem"
             cur.execute(open_query, open_params)
             for r in cur.fetchall():
                 b_pcs = float(r[4] or 0)
@@ -871,7 +862,7 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
         rows = open_rows + [parse_fi_row(r) for r in cur.fetchall()]
 
         if status == "Pending":
-            return [r for r in rows if (r.get('is_opening') and r.get('balpcs', 0) > 0) or (r['stat'] == 'P' and r.get('balpcs', 0) > 0)]
+            return [r for r in rows if r.get('balpcs', 0) > 0 and r.get('stat') != 'C']
         elif status == "Close":
             return [r for r in rows if r['stat'] == 'C']
         return rows
@@ -892,13 +883,16 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
         cur = conn.cursor()
 
         # Step 1: Pre-fetch linked FI re-issues into Python dictionary (safe against SQL type conversions)
+        # NOTE: SrChr is NOT filtered here - a reissue can carry any SrChr (R, W, RF, S, X, etc).
+        # The link back to the original reprocess challan is established purely via
+        # RecSr/OrderNo/RefNo matching the FR challan's Serial - not via SrChr/JobType.
         query_fi = """
             SELECT 
                 cd_i.RecSr, cd_i.OrderNo, cd_i.RefNo,
                 ISNULL(cd_i.Pcs, 0) as pcs
             FROM CHALDATA cd_i
             JOIN CHALMAST cm_i ON cd_i.ControlId = cm_i.EntryId
-            WHERE cm_i.Mode = 'FI' AND (cm_i.SrChr = 'R' OR cm_i.SrChr LIKE '%R%' OR cd_i.JobType = 'RF')
+            WHERE cm_i.Mode = 'FI'
         """
         cur.execute(query_fi)
         reissue_map = defaultdict(float)
@@ -947,13 +941,6 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
             FROM CHALMAST cm
             JOIN CHALDATA cd ON cm.EntryId = cd.ControlId
             WHERE cm.Mode = 'FR'
-              AND (
-                cd.NewItem IS NULL 
-                OR LTRIM(RTRIM(cd.NewItem)) = '' 
-                OR UPPER(LTRIM(RTRIM(cd.NewItem))) = 'RF'
-                OR UPPER(LTRIM(RTRIM(cd.JobType))) = 'RF'
-                OR UPPER(LTRIM(RTRIM(cm.SrChr))) LIKE '%RF%'
-              )
         """
         params = []
 
@@ -984,7 +971,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
             params.extend([st, st, st])
 
         df_parsed = _parse_date_param(date_from)
-        if df_parsed:
+        if df_parsed and str(status).strip().upper() not in ("PENDING", "P"):
             select_part += " AND cm.Date >= ?"
             params.append(df_parsed)
 
@@ -1001,7 +988,9 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                     COALESCE(NULLIF(cd.JobItem, ''), cd.ItemName, '') as jobitem,
                     ISNULL(cd.JobType, '') as jobtype,
                     SUM(ISNULL(cd.Pcs, 0)) as pcs,
-                    SUM(CASE WHEN cd.Stat = 'C' THEN 0 ELSE CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) END END) as balpcs
+                    -- Same principle: don't force balance to 0 just because Stat='C' says so
+                    -- (Stat may be stale/not updated) - use the actual computed balance.
+                    SUM(CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) END) as balpcs
                 FROM CHALMAST cm
                 JOIN CHALDATA cd ON cm.EntryId = cd.ControlId
                 WHERE cm.Mode = 'FR'
@@ -1028,7 +1017,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 open_query += " AND (cd.JobItem LIKE ? OR cd.ItemName LIKE ? OR cd.GroupName LIKE ?)"
                 st = f"%{item.strip()}%"
                 open_params.extend([st, st, st])
-            open_query += " GROUP BY cm.Party, cd.JobItem, cd.ItemName, cd.JobType HAVING SUM(CASE WHEN cd.Stat = 'C' THEN 0 ELSE CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) END END) <> 0 ORDER BY jobber, jobitem"
+            open_query += " GROUP BY cm.Party, cd.JobItem, cd.ItemName, cd.JobType HAVING SUM(CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) END) <> 0 ORDER BY jobber, jobitem"
             cur.execute(open_query, open_params)
             for r in cur.fetchall():
                 b_pcs = float(r[4] or 0)
@@ -1100,29 +1089,46 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 rec_sr = str(r['RecSr']).strip() if r['RecSr'] and str(r['RecSr']).strip() != '0' else serial_str
                 recsr = sr_chr + rec_sr
 
-                if raw_rfpcs > 0:
+                jtype_str = str(r['JobType']).strip().upper() if r['JobType'] else ""
+                raw_plain_val = float(r['plainpcs'] or 0)
+                if jtype_str in ('RETURN', 'SECOND', 'DEMAGE', 'SHT'):
+                    pcs = 0.0
+                    plainpcs = raw_plain_val if raw_plain_val > 0 else float(r['pcs'] or 0)
                     calc_rfpcs = raw_rfpcs
                     calc_recpcs = recpcs_raw
-                elif avail_reissue > 0:
-                    calc_rfpcs = min(pcs, avail_reissue)
-                    avail_reissue -= calc_rfpcs
-                    calc_recpcs = recpcs_raw
+                    calc_balpcs = plainpcs + calc_rfpcs + calc_recpcs
                 else:
-                    calc_rfpcs = 0.0
-                    calc_recpcs = recpcs_raw
+                    pcs = float(r['pcs'] or 0)
+                    plainpcs = raw_plain_val
+                    if raw_rfpcs > 0:
+                        calc_rfpcs = raw_rfpcs
+                        calc_recpcs = recpcs_raw
+                    elif avail_reissue > 0:
+                        calc_rfpcs = min(pcs, avail_reissue)
+                        avail_reissue -= calc_rfpcs
+                        calc_recpcs = recpcs_raw
+                    else:
+                        calc_rfpcs = 0.0
+                        calc_recpcs = recpcs_raw
 
-                total_returned = calc_rfpcs + plainpcs + calc_recpcs + spcs + secpcs + retpcs + shtpcs + wastepcs
-                if raw_balpcs > 0:
-                    calc_balpcs = raw_balpcs
-                else:
-                    calc_balpcs = max(0.0, pcs - total_returned)
+                    total_returned = calc_rfpcs + plainpcs + calc_recpcs + spcs + secpcs + retpcs + shtpcs + wastepcs
+                    if total_returned > 0:
+                        calc_balpcs = max(0.0, pcs - total_returned)
+                    elif raw_balpcs > 0:
+                        calc_balpcs = raw_balpcs
+                    else:
+                        calc_balpcs = max(0.0, pcs)
 
-                stat_raw = str(r['Stat']).strip() if r['Stat'] else "P"
-                if stat_raw in ('C', 'CLOSE') and calc_balpcs <= 0 and raw_balpcs <= 0:
+                new_item_val = str(r['NewItem']).strip().upper() if r['NewItem'] else ""
+                is_sale_item_filled = bool(new_item_val and new_item_val != 'RF')
+
+                # Status decided purely from the CALCULATED balpcs - not from the DB's
+                # own Stat column, which may not always be kept up to date manually.
+                # BalPcs = 0 simply means Closed, no matter what Stat says.
+                if is_sale_item_filled or calc_balpcs <= 0:
                     stat = 'C'
-                    calc_balpcs = 0.0
-                elif calc_balpcs <= 0:
-                    stat = 'C'
+                    if is_sale_item_filled:
+                        calc_balpcs = 0.0
                 else:
                     stat = 'P'
 
@@ -1155,10 +1161,11 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
 
         rows = open_rows + fr_parsed_rows
 
-        if status == "Pending":
-            return [r for r in rows if (r.get('is_opening') and r.get('balpcs', 0) > 0) or (r['stat'] == 'P' and r.get('balpcs', 0) > 0)]
-        elif status == "Close":
-            return [r for r in rows if r['stat'] == 'C']
+        st_upper = str(status).strip().upper()
+        if st_upper in ("PENDING", "P"):
+            return [r for r in rows if r.get('balpcs', 0) > 0 and r.get('stat') != 'C']
+        elif st_upper in ("CLOSED", "CLOSE", "C"):
+            return [r for r in rows if r.get('stat') == 'C' or r.get('balpcs', 0) <= 0]
         return rows
     finally:
         try: conn.close()
