@@ -2811,7 +2811,7 @@ def api_folding_payment():
                         "jobber": jbr,
                         "jobber_id": jbr,
                         "pcs": float(ji.get("pcs", 0) or 0),
-                        "jobitem": ji.get("itemname", ji.get("jobitem", "")),
+                        "jobitem": ji.get("jobitem", ji.get("itemname", "")),
                         "iss_date": ji.get("date", ""),
                         "date": ji.get("date", "")
                     })
