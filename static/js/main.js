@@ -1,3 +1,127 @@
+window.allChallanImagesMap = window.allChallanImagesMap || {};
+window.allGroupImagesMap = window.allGroupImagesMap || {};
+window.itemChallanMap = window.itemChallanMap || {};
+
+window.loadAllChallanImagesMap = async function() {
+  try {
+    const res = await fetch('/api/challan/all_images_map');
+    const data = await res.json();
+    if (data.status === 'success') {
+      window.allChallanImagesMap = data.data || {};
+    }
+  } catch (e) {
+    console.warn('Failed to load challan images map:', e);
+  }
+};
+
+window.loadAllGroupImagesMap = async function() {
+  try {
+    const res = await fetch('/api/group_photo/all_images_map');
+    const data = await res.json();
+    if (data.status === 'success') {
+      window.allGroupImagesMap = data.data || {};
+    }
+  } catch (e) {
+    console.warn('Failed to load group images map:', e);
+  }
+};
+
+window.loadItemChallanMap = async function() {
+  try {
+    const res = await fetch('/api/item_challan_map');
+    const data = await res.json();
+    if (data.status === 'success') {
+      window.itemChallanMap = data.data || {};
+    }
+  } catch (e) {
+    console.warn('Failed to load item challan map:', e);
+  }
+};
+
+window.renderInlineChallanPhoto = function(cnoKey) {
+  if (!cnoKey) return '';
+  const key = String(cnoKey).trim().toUpperCase();
+  const imgs = window.allChallanImagesMap[key] || [];
+  if (!imgs || imgs.length === 0) {
+    return `<button type="button" class="btn btn-sm btn-outline-primary py-0 px-1" onclick="openPhotoModal('${key}')" style="font-size:10px;" title="Add Photo"><i class="fa-solid fa-camera"></i> +Photo</button>`;
+  }
+  const first = imgs[0];
+  const src = first.base64_data || first.url;
+  const countBadge = imgs.length > 1 ? `<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:9px;font-weight:bold;padding:1px 4px;border-radius:10px;">+${imgs.length-1}</span>` : '';
+  return `<span style="position:relative;display:inline-block;cursor:pointer;" onclick="openPhotoModal('${key}')"><img src="${src}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid #cbd5e1;vertical-align:middle;" onerror="this.src='/static/placeholder.png'">${countBadge}</span>`;
+};
+
+
+window.getGroupKey = function(grpName, itemName) {
+  if (grpName && String(grpName).trim()) return String(grpName).trim().toUpperCase();
+  if (itemName && String(itemName).trim()) {
+    const raw = String(itemName).trim().toUpperCase();
+    if (raw.includes('-')) return raw.split('-')[0].trim();
+    if (raw.includes(' ')) return raw.split(' ')[0].trim();
+    return raw;
+  }
+  return '';
+};
+
+window.getPhotoForGroupOrItem = function(grpKey, itemName) {
+  const gKey = (grpKey || '').trim().toUpperCase();
+  const iKey = (itemName || '').trim().toUpperCase();
+
+  // 1. Exact match on Group Name
+  if (gKey && window.allGroupImagesMap[gKey] && window.allGroupImagesMap[gKey].length > 0) {
+    return window.allGroupImagesMap[gKey];
+  }
+
+  // 2. Exact match on Item Name in Group Images
+  if (iKey && window.allGroupImagesMap[iKey] && window.allGroupImagesMap[iKey].length > 0) {
+    return window.allGroupImagesMap[iKey];
+  }
+
+  // 3. Exact match on Item Name in Challan Images
+  if (iKey && window.allChallanImagesMap[iKey] && window.allChallanImagesMap[iKey].length > 0) {
+    return window.allChallanImagesMap[iKey];
+  }
+
+  // 4. Variant Match (e.g. FIZZA-L -> FIZZA, if FIZZA exists as a group key)
+  if (iKey) {
+    const dashIdx = iKey.lastIndexOf('-');
+    if (dashIdx > 0) {
+      const parentGrp = iKey.substring(0, dashIdx).trim();
+      if (parentGrp && window.allGroupImagesMap[parentGrp] && window.allGroupImagesMap[parentGrp].length > 0) {
+        return window.allGroupImagesMap[parentGrp];
+      }
+    }
+  }
+
+  return [];
+};
+
+window.renderInlineGroupPhoto = function(grpKey, itemName) {
+  const searchKey = grpKey || itemName || '';
+  if (!searchKey) return '';
+  const key = window.getGroupKey(grpKey, itemName);
+  const imgs = window.getPhotoForGroupOrItem(grpKey, itemName);
+
+  if (!imgs || imgs.length === 0) {
+    return `<button type="button" class="btn btn-sm btn-outline-primary py-0 px-1" onclick="openGroupPhotoModal('${key}')" style="font-size:10px;" title="Add Photo"><i class="fa-solid fa-camera"></i> +Photo</button>`;
+  }
+  const first = imgs[0];
+  const src = first.base64_data || first.url;
+  const countBadge = imgs.length > 1 ? `<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:9px;font-weight:bold;padding:1px 4px;border-radius:10px;">+${imgs.length-1}</span>` : '';
+  return `<span style="position:relative;display:inline-block;cursor:pointer;" onclick="viewFullPhoto('${src}')" title="Click to View Photo (or double click for options)"><img src="${src}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid #cbd5e1;vertical-align:middle;" onerror="this.src='/static/placeholder.png'">${countBadge}</span> <button type="button" class="btn btn-sm btn-link p-0 text-muted" onclick="openGroupPhotoModal('${key}')" title="Manage Photos" style="font-size:10px; margin-left:2px;"><i class="fa-solid fa-gear"></i></button>`;
+};
+
+// ══════════════════════════════════════════════════════════════════════════
+// AUTO-LOAD ALL PHOTO MAPS ON INITIAL APP STARTUP
+// ══════════════════════════════════════════════════════════════════════════
+(function initAppPhotoMaps() {
+  if (typeof loadAllGroupImagesMap === 'function') loadAllGroupImagesMap();
+  if (typeof loadAllChallanImagesMap === 'function') loadAllChallanImagesMap();
+  if (typeof loadItemChallanMap === 'function') loadItemChallanMap();
+})();
+
+
+
 
 // ══════════════════════════════════════════════════════════════════════════
 // STALE-DATA (CLOUD SNAPSHOT) WARNING BANNER
@@ -1158,7 +1282,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         allReportData = data;
         window.showSnapshotBanner(data);
-        filterAndRenderReqReport();
+        Promise.all([loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderReqReport);
       })
       .catch(err => {
         reqListContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-triangle-exclamation text-danger"></i><p>Network / Server error occurred</p></div>`;
@@ -1236,7 +1360,7 @@ document.addEventListener("DOMContentLoaded", () => {
         
         card.innerHTML = `
           <div class="report-header-row">
-            <span class="font-bold">${row.group_name}</span>
+            <span class="font-bold">${row.group_name}</span> ${renderInlineGroupPhoto(row.group_name)} ${renderInlineGroupPhoto(row.group_name)}
             <span class="badge ${badgeClass}">${row.status}</span>
           </div>
           <div class="report-details-grid">
@@ -1262,6 +1386,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <thead>
           <tr>
             <th>#</th>
+            <th style="width: 8%; text-align:center;">PHOTO</th>
             <th>GROUP NAME</th>
             <th>ORDER DATE</th>
             <th style="text-align:right;">ORDER PCS</th>
@@ -1282,6 +1407,7 @@ document.addEventListener("DOMContentLoaded", () => {
           reqTableHtml += `
             <tr>
               <td>${rIdx++}</td>
+              <td style="text-align:center; vertical-align:middle; padding:4px !important;">${renderInlineGroupPhoto(row.group_name)}</td>
               <td class="cell-group" style="font-weight:700; color:#1e40af;">${row.group_name}</td>
               <td>${row.latest_order_date || "-"}</td>
               <td style="text-align:right;">${row.order_pcs}</td>
@@ -1395,7 +1521,7 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
         allOosData = data.filter(row => row.status === "OUT OF STOCK");
-        filterAndRenderOosReport();
+        Promise.all([loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderOosReport);
       })
       .catch(err => {
         if (oosListContainer) {
@@ -1486,6 +1612,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <thead>
           <tr style="background:#ef4444 !important; color:#fff;">
             <th>#</th>
+            <th style="width: 8%; text-align:center;">PHOTO</th>
             <th>GROUP NAME</th>
             <th>ORDER DATE</th>
             <th style="text-align:right;">ORDER PCS</th>
@@ -1504,6 +1631,7 @@ document.addEventListener("DOMContentLoaded", () => {
           oosTableHtml += `
             <tr>
               <td>${oIdx++}</td>
+              <td style="text-align:center; vertical-align:middle; padding:4px !important;">${renderInlineGroupPhoto(row.group_name)}</td>
               <td class="cell-group" style="font-weight:700; color:#dc2626;">${row.group_name}</td>
               <td>${row.latest_order_date || "-"}</td>
               <td style="text-align:right;">${row.order_pcs}</td>
@@ -1885,7 +2013,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         allStockData = data;
         window.showSnapshotBanner(data);
-        filterAndRenderAllStock();
+        Promise.all([loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderAllStock);
       })
       .catch(err => {
         listContainer.innerHTML = `<div class="empty-state"><p class="text-danger">Failed to connect to server</p></div>`;
@@ -1982,7 +2110,7 @@ function filterAndRenderAllStock() {
       card.className = "report-card";
       card.innerHTML = `
         <div class="report-header-row">
-          <span class="font-bold" style="font-size: 15px; color: #0f172a;">${row.group_name}</span>
+          <span class="font-bold" style="font-size: 15px; color: #0f172a;">${row.group_name}</span> ${renderInlineGroupPhoto(row.group_name)}
           <span class="badge ${row.total_stock_pcs > 0 ? 'badge-available' : 'badge-oos'}">${row.total_stock_pcs} Pcs</span>
         </div>
         <div class="report-details-grid" style="grid-template-columns: repeat(3, 1fr);">
@@ -2014,8 +2142,9 @@ function filterAndRenderAllStock() {
         <table class="print-table">
           <thead>
             <tr>
-              <th style="width: 5%;">#</th>
-              <th style="width: 35%;">Group Name</th>
+              <th style="width: 4%;">#</th>
+              <th style="width: 8%; text-align:center;">Photo</th>
+              <th style="width: 32%;">Group Name</th>
               <th style="width: 15%;">Finish Stock</th>
               <th style="width: 15%;">Job Issue</th>
               <th style="width: 15%;">Job Reprocess</th>
@@ -2029,6 +2158,7 @@ function filterAndRenderAllStock() {
         tableHtml += `
           <tr>
             <td>${idx + 1}</td>
+            <td style="text-align:center; vertical-align:middle; padding:4px !important;">${renderInlineGroupPhoto(row.group_name)}</td>
             <td style="font-weight: bold;">${row.group_name}</td>
             <td>${row.stock_pcs}</td>
             <td>${row.job_issue_pcs}</td>
@@ -2086,7 +2216,7 @@ function filterAndRenderAllStock() {
         }
         allOrderDetails = data;
         window.showSnapshotBanner(data);
-        loadItemChallanMap().finally(filterAndRenderOrderDetails);
+        Promise.all([loadItemChallanMap(), loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderOrderDetails);
       })
       .catch(err => {
         listContainer.innerHTML = `<div class="empty-state"><p class="text-danger">Failed to connect to server</p></div>`;
@@ -2179,13 +2309,15 @@ function filterAndRenderAllStock() {
         <table class="print-table">
           <thead>
             <tr>
-              <th style="width: 5%;">#</th>
+              <th style="width: 4%;">#</th>
               <th style="width: 8%; text-align:center;">Photo</th>
-              <th style="width: 15%;">Party</th>
+              <th style="width: 16%;">Party</th>
               <th style="width: 10%;">Order No</th>
-              <th style="width: 10%;">Date</th>
-              <th style="width: 10%;">Billed Pcs</th>
-              <th style="width: 10%;">Balance Pcs</th>
+              <th style="width: 9%;">Date</th>
+              <th style="width: 18%;">Item Name</th>
+              <th style="width: 9%;">Order Pcs</th>
+              <th style="width: 9%;">Billed Pcs</th>
+              <th style="width: 9%;">Balance Pcs</th>
               <th style="width: 8%;">Status</th>
             </tr>
           </thead>
@@ -2194,9 +2326,11 @@ function filterAndRenderAllStock() {
       
       filtered.forEach((row, idx) => {
         const statusColor = row.status.toLowerCase() === "pending" ? "color: #ef4444;" : "color: #10b981;";
+        const rowPhotoHtml = renderInlineGroupPhoto(row.group_name, row.item_name);
         tableHtml += `
           <tr>
             <td>${idx + 1}</td>
+            <td style="text-align:center; vertical-align:middle; padding:4px !important;">${rowPhotoHtml}</td>
             <td>${row.party}</td>
             <td style="font-weight: bold;">${row.order_no}</td>
             <td>${row.order_date}</td>
@@ -2419,7 +2553,7 @@ function filterAndRenderAllStock() {
         }
         allPurchaseStockData = data;
         window.showSnapshotBanner(data);
-        filterAndRenderPurchaseStock();
+        Promise.all([loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderPurchaseStock);
       })
       .catch(err => {
         listContainer.innerHTML = `<div class="empty-state"><p class="text-danger">Failed to connect to server</p></div>`;
@@ -2980,7 +3114,7 @@ function filterAndRenderAllStock() {
         if (data.status === "success") {
           allJobIssueData = data.data || [];
           window.showSnapshotBanner(data);
-          filterAndRenderJobIssue();
+          Promise.all([loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderJobIssue);
           const jiCard = document.getElementById("ji-filter-card") || document.getElementById("jobIssueReportCard");
           if (jiCard) jiCard.classList.add("collapsed");
         } else {
@@ -3105,6 +3239,7 @@ function filterAndRenderAllStock() {
         <table class="br-table print-table" style="width:100%;">
           <thead>
             <tr style="background:#0f172a; color:#ffffff;">
+              <th style="width:8%; text-align:center;">PHOTO</th>
               <th style="text-align:left;">${groupPattern.toUpperCase()} GROUP</th>
               <th style="text-align:center;">CHALLANS</th>
               <th style="text-align:right;">ISSUED PCS</th>
@@ -3123,6 +3258,7 @@ function filterAndRenderAllStock() {
         const g = groups[gKey];
         tableHtml += `
           <tr style="background:${idx % 2 === 0 ? '#f8fafc' : '#ffffff'}; font-weight:700;">
+            <td style="text-align:center; vertical-align:middle; padding:4px !important;">${renderInlineGroupPhoto(g.name)}</td>
             <td style="text-align:left; color:#1d4ed8; font-size:13px;">${g.name}</td>
             <td style="text-align:center;"><span class="badge badge-info" style="background:#3b82f6; color:#fff; font-size:11px; padding:2px 8px;">${g.count}</span></td>
             <td style="text-align:right; color:#1d4ed8;">${g.pcs.toFixed(0)}</td>
@@ -3208,7 +3344,7 @@ function filterAndRenderAllStock() {
         tableHtml += `
           <tr style="${rowBg}">
             <td style="text-align:center; vertical-align:middle; padding:4px !important;">
-              ${renderInlineChallanPhoto(row.isssr || row.issno)}
+              ${renderInlineGroupPhoto(row.jobitem, row.jobitem) || renderInlineChallanPhoto(row.isssr || row.issno)}
             </td>
             <td>${dateCell}</td>
             <td class="cell-party" style="font-weight:700; text-align:left;">${row.jobber}</td>
@@ -3554,7 +3690,7 @@ function filterAndRenderAllStock() {
     const inwType = document.getElementById("jr-inw-type")?.value || "All";
     
     const checkedJt = Array.from(document.querySelectorAll('.jr-jt-cb:checked')).map(cb => cb.value);
-    const jobTypeParam = checkedJt.length ? checkedJt.join(",") : "All";
+    const jobTypeParam = checkedJt.length > 0 ? checkedJt.join(",") : "All";
 
     const statusEl = document.querySelector('input[name="jr_status"]:checked');
     const statusVal = statusEl ? statusEl.value : "Pending";
@@ -3571,7 +3707,7 @@ function filterAndRenderAllStock() {
         }
         if (data.status === "success") {
           allJobReprocessData = data.data || [];
-          filterAndRenderJobReprocess();
+          Promise.all([loadAllGroupImagesMap(), loadAllChallanImagesMap()]).finally(filterAndRenderJobReprocess);
           window.showSnapshotBanner(data);
           const jrCard = document.getElementById("jr-filter-card") || document.getElementById("jobReprocessReportCard");
           if (jrCard) jrCard.classList.add("collapsed");
@@ -3788,7 +3924,7 @@ function filterAndRenderAllStock() {
         tableHtml += `
           <tr style="${rowBg}">
             <td style="text-align:center; vertical-align:middle; padding:4px !important;">
-              ${renderInlineChallanPhoto(row.issno || row.recsr)}
+              ${renderInlineGroupPhoto(row.jobitem || row.itemname, row.itemname || row.jobitem) || renderInlineChallanPhoto(row.issno || row.recsr)}
             </td>
             <td style="font-weight:700; color:#1d4ed8;">${row.issno}</td>
             <td style="font-weight:700; color:#047857;">${row.recsr}</td>
@@ -5030,8 +5166,22 @@ window.renderInlineChallanPhoto = function(challanNo) {
 loadAllChallanImagesMap();
 
 // --- Challan Photo Management ---
+
+window.isGroupPhotoModalMode = false;
+
+window.openPhotoModal = function(key) {
+  window.isGroupPhotoModalMode = false;
+  window.openChallanImageModal(key);
+};
+
+window.openGroupPhotoModal = function(key) {
+  window.isGroupPhotoModalMode = true;
+  window.openChallanImageModal(key);
+};
+
 window.openChallanImageModal = function(challanNo) {
   const modal = document.getElementById('modal-challan-image');
+  const titleLabel = document.getElementById('modal-photo-title-label');
   const titleNo = document.getElementById('modal-challan-title-no');
   const inputChallanNo = document.getElementById('upload-challan-no');
   const fileNameDisplay = document.getElementById('selected-file-name');
@@ -5039,6 +5189,8 @@ window.openChallanImageModal = function(challanNo) {
   const fileInput = document.getElementById('challan-image-file-input');
   const cameraInput = document.getElementById('challan-camera-input');
 
+  const labelText = window.isGroupPhotoModalMode ? 'Item / Group Photos' : 'Challan Photos';
+  if (titleLabel) titleLabel.textContent = labelText;
   if (titleNo) titleNo.textContent = challanNo;
   if (inputChallanNo) inputChallanNo.value = challanNo;
   if (fileNameDisplay) fileNameDisplay.textContent = '';
@@ -5047,7 +5199,12 @@ window.openChallanImageModal = function(challanNo) {
   if (cameraInput) cameraInput.value = '';
 
   if (modal) modal.style.display = 'flex';
-  loadChallanPhotos(challanNo);
+
+  if (window.isGroupPhotoModalMode) {
+    loadGroupPhotos(challanNo);
+  } else {
+    loadChallanPhotos(challanNo);
+  }
 };
 
 window.loadChallanPhotos = async function(challanNo) {
@@ -5057,7 +5214,7 @@ window.loadChallanPhotos = async function(challanNo) {
   container.innerHTML = '<div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading photos...</div>';
 
   try {
-    const res = await fetch(`/api/challan/images/${encodeURIComponent(challanNo)}`);
+    const res = await fetch(`/api/challan/images?cno=${encodeURIComponent(challanNo)}`);
     const data = await res.json();
 
     if (data.status === 'success' && Array.isArray(data.images)) {
@@ -5092,6 +5249,67 @@ window.viewFullPhoto = function(url) {
   const img = document.getElementById('full-photo-img');
   if (img) img.src = url;
   if (modal) modal.style.display = 'flex';
+};
+
+
+window.loadGroupPhotos = async function(groupName) {
+  const container = document.getElementById('challan-photos-container');
+  if (!container) return;
+
+  container.innerHTML = '<div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading photos...</div>';
+
+  try {
+    const res = await fetch(`/api/group_photo/images?name=${encodeURIComponent(groupName)}`);
+    const data = await res.json();
+
+    if (data.status === 'success' && Array.isArray(data.images)) {
+      if (data.images.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="grid-column: 1/-1; padding:20px; text-align:center; color:var(--text-sub);"><i class="fa-solid fa-image" style="font-size:28px; margin-bottom:6px;"></i><p style="font-size:12px;">Is Group / Item ke liye koi photo attached nahi hai</p></div>';
+        return;
+      }
+
+      let html = '';
+      data.images.forEach(img => {
+        const src = img.base64_data || img.url;
+        html += `
+          <div class="photo-card" style="position:relative; background:var(--bg-card); border:1px solid var(--bg-card-border); border-radius:10px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+            <img src="${src}" alt="Group Photo" onclick="viewFullPhoto('${src}')" style="width:100%; height:110px; object-fit:cover; cursor:pointer; display:block;" onerror="this.src='/static/placeholder.png'">
+            <div style="padding:6px 8px; font-size:10px; display:flex; justify-content:space-between; align-items:center; background:var(--bg-app);">
+              <span style="color:var(--text-sub); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px;" title="${img.uploaded_at}">${img.uploaded_at ? img.uploaded_at.split(' ')[0] : 'Photo'}</span>
+              <button type="button" onclick="deleteGroupPhoto('${groupName}', '${img.id}')" title="Delete Photo" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:12px; padding:2px;"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    } else {
+      container.innerHTML = `<div class="empty-state" style="grid-column: 1/-1; color:#ef4444;">${data.error || 'Failed to load photos'}</div>`;
+    }
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state" style="grid-column: 1/-1; color:#ef4444;">Error loading photos</div>';
+  }
+};
+
+window.deleteGroupPhoto = async function(groupName, imageId) {
+  if (!confirm('Pakka ye group photo delete karni hai?')) return;
+
+  try {
+    const res = await fetch('/api/group_photo/delete_image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_name: groupName, image_id: imageId })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'success') {
+      await loadAllGroupImagesMap();
+      loadGroupPhotos(groupName);
+      if (typeof filterAndRenderOrderDetails === 'function') filterAndRenderOrderDetails();
+    } else {
+      alert('Error: ' + (data.error || 'Failed to delete photo'));
+    }
+  } catch (err) {
+    alert('Server error: ' + err);
+  }
 };
 
 window.deleteChallanPhoto = async function(challanNo, imageId) {
@@ -5184,9 +5402,14 @@ document.addEventListener("DOMContentLoaded", () => {
   if (formUploadImg) {
     formUploadImg.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const challanNo = document.getElementById('upload-challan-no').value;
+      const nameKey = document.getElementById('upload-challan-no').value;
+      const uploadUrl = window.isGroupPhotoModalMode ? '/api/group_photo/upload_image' : '/api/challan/upload_image';
       const formData = new FormData();
-      formData.append('challan_no', challanNo);
+      if (window.isGroupPhotoModalMode) {
+        formData.append('group_name', nameKey);
+      } else {
+        formData.append('challan_no', nameKey);
+      }
 
       let fileCount = 0;
       if (fileInput && fileInput.files && fileInput.files.length > 0) {
@@ -5199,7 +5422,7 @@ document.addEventListener("DOMContentLoaded", () => {
         fileCount++;
       }
 
-      if (!challanNo || fileCount === 0) {
+      if (!nameKey || fileCount === 0) {
         alert('Please select or capture at least one image file');
         return;
       }
@@ -5217,11 +5440,17 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       try {
-        const res = await fetch('/api/challan/upload_image', {
+        const res = await fetch(uploadUrl, {
           method: 'POST',
           body: formData
         });
-        const data = await res.json();
+        let data = {};
+        try {
+          data = await res.json();
+        } catch (parseErr) {
+          alert('Server error (' + res.status + '): Photo save failed.');
+          return;
+        }
         if (res.ok && data.status === 'success') {
           // Backup each uploaded photo locally on this device (IndexedDB),
           // so it can be auto-recovered later if Render's storage resets.
@@ -5233,8 +5462,8 @@ document.addEventListener("DOMContentLoaded", () => {
               try {
                 const base64 = await sknFileToBase64(srcFile);
                 await window.sknLocalPhotoDB.save({
-                  local_key: `${challanNo}_${rec.id}`,
-                  challan_no: challanNo,
+                  local_key: `${nameKey}_${rec.id}`,
+                  challan_no: nameKey,
                   image_id: rec.id,
                   filename: rec.filename,
                   base64: base64
@@ -5245,8 +5474,15 @@ document.addEventListener("DOMContentLoaded", () => {
           formUploadImg.reset();
           if (fileNameDisplay) fileNameDisplay.textContent = '';
           if (btnSubmit) btnSubmit.style.display = 'none';
-          await loadAllChallanImagesMap();
-          loadChallanPhotos(challanNo);
+          if (window.isGroupPhotoModalMode) {
+            await loadAllGroupImagesMap();
+            loadGroupPhotos(nameKey);
+            if (typeof filterAndRenderOrderDetails === 'function') filterAndRenderOrderDetails();
+            if (typeof filterAndRenderAllStock === 'function') filterAndRenderAllStock();
+          } else {
+            await loadAllChallanImagesMap();
+            loadChallanPhotos(nameKey);
+          }
         } else {
           alert('Error: ' + (data.error || 'Failed to upload photo(s)'));
         }
