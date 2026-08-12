@@ -114,14 +114,20 @@ def calculate_stock_by_group(sql_settings, include_opening=True, conn=None, item
                 prev_stk_map = {str(r[0]).strip().upper(): float(r[1] or 0.0) for r in cur_p.fetchall() if r[0]}
 
                 q_prev_adj = f"""
-                    SELECT UPPER(LTRIM(RTRIM(COALESCE(NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName))), SUM(cd.Pcs)
+                    SELECT UPPER(LTRIM(RTRIM(COALESCE(NULLIF(cd.NewItem, ''), NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName)))), SUM(cd.Pcs)
                     FROM {db_prev}.dbo.CHALDATA cd
                     JOIN {db_prev}.dbo.CHALMAST cm ON cd.ControlId = cm.EntryId
                     LEFT JOIN {db_prev}.dbo.ITEMMST i_job ON cd.JobItem = i_job.ItemName
                     LEFT JOIN {db_prev}.dbo.ITEMMST i_item ON cd.ItemName = i_item.ItemName
                     WHERE cm.Godown IN ('ADJ','CASH SALE','EXTRA PACKED','PURCHASE','RETURN ADJ','STOCK NEW')
                        OR cm.Mode IN ('GO','AO','OP')
-                    GROUP BY UPPER(LTRIM(RTRIM(COALESCE(NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName))))
+                       -- FIX: FR+NewItem:  sirf tab EXCLUDE karo jab NewItem = JobItem (same item reprocess)
+                       -- Tab FINITEMSTOCK.JRPcs mein wo pcs already hain → double count avoid.
+                       -- Jab NewItem != JobItem (jaise VIRAL GIRL) → FINITEMSTOCK mein nahi hoga → INCLUDE karo
+                       OR (cd.NewItem IS NOT NULL AND LTRIM(RTRIM(cd.NewItem)) != '' AND LTRIM(RTRIM(cd.NewItem)) != '0'
+                           AND (cm.Mode != 'FR'
+                                OR UPPER(LTRIM(RTRIM(cd.NewItem))) != UPPER(LTRIM(RTRIM(ISNULL(cd.JobItem, ''))))))
+                    GROUP BY UPPER(LTRIM(RTRIM(COALESCE(NULLIF(cd.NewItem, ''), NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName))))
                 """
                 try:
                     cur_p.execute(q_prev_adj)
@@ -174,8 +180,13 @@ def calculate_stock_by_group(sql_settings, include_opening=True, conn=None, item
             item_to_group[iname] = gname if gname else iname
 
         # Fetch CURRENT YEAR CHALDATA adjustments (ALL items, NO filtering)
+        # FIX (2026-08-12): FR+NewItem double-count fix — refined logic:
+        #   - Agar FR challan mein NewItem = JobItem (same item reprocess) → FINITEMSTOCK.JRPcs
+        #     mein woh pcs ALREADY hain → CHALDATA adj mein add karna = DOUBLE COUNT ❌
+        #   - Agar FR challan mein NewItem != JobItem (jaise VIRAL GIRL → different finish item)
+        #     → FINITEMSTOCK mein woh item track NAHI hoga → CHALDATA adj sahi source hai ✅
         q_adj = f"""
-            SELECT UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName), '')))) AS group_name,
+            SELECT UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(cd.NewItem, ''), NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName), '')))) AS group_name,
                    SUM(cd.Pcs) AS adj_pcs
             FROM {db_curr}.dbo.CHALDATA cd
             JOIN {db_curr}.dbo.CHALMAST cm ON cd.ControlId = cm.EntryId
@@ -183,7 +194,14 @@ def calculate_stock_by_group(sql_settings, include_opening=True, conn=None, item
             LEFT JOIN {db_curr}.dbo.ITEMMST i_item ON cd.ItemName = i_item.ItemName
             WHERE cm.Godown IN ('ADJ','CASH SALE','EXTRA PACKED','PURCHASE','RETURN ADJ','STOCK NEW')
                OR cm.Mode IN ('GO','AO','OP')
-            GROUP BY UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName), ''))))
+               -- NewItem condition:
+               --   Non-FR: hamesha include (GO/AO/OP mode adjustments)
+               --   FR mode: sirf tab include karo jab NewItem != JobItem (different item → VIRAL GIRL type)
+               --            FR + NewItem=JobItem → already in FINITEMSTOCK JRPcs → skip (double count avoid)
+               OR (cd.NewItem IS NOT NULL AND LTRIM(RTRIM(cd.NewItem)) != '' AND LTRIM(RTRIM(cd.NewItem)) != '0'
+                   AND (cm.Mode != 'FR'
+                        OR UPPER(LTRIM(RTRIM(cd.NewItem))) != UPPER(LTRIM(RTRIM(ISNULL(cd.JobItem, ''))))))
+            GROUP BY UPPER(LTRIM(RTRIM(ISNULL(COALESCE(NULLIF(cd.NewItem, ''), NULLIF(cd.GroupName, ''), NULLIF(i_job.GroupName, ''), NULLIF(i_item.GroupName, ''), NULLIF(cd.JobItem, ''), cd.ItemName), ''))))
         """
         cur_c.execute(q_adj)
         new_adj_map = {str(r[0] or "").strip().upper(): float(r[1] or 0.0) for r in cur_c.fetchall() if r[0]}
@@ -1007,23 +1025,39 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
             recpcs_raw = float(r['recpcs_raw'] or 0)
             secpcs = float(r['secpcs'] or 0)
             shtpcs = float(r['shtpcs'] or 0)
-            spcs = float(r['spcs'] or 0)
-            retpcs = float(r['retpcs'] or 0)
-            wastepcs = float(r['wastepcs'] or 0)
+            spcs = 0.0
+            retpcs = 0.0
+            wastepcs = 0.0
 
-            calc_rfpcs = raw_rfpcs if raw_rfpcs > 0 else (min(recpcs_raw if recpcs_raw > 0 else raw_pcs, avail_reissue) if avail_reissue > 0 else 0.0)
-            if avail_reissue > 0 and raw_rfpcs <= 0:
+            # RfPcs is still computed (preferring the actual FI-linked reissue amount over
+            # the stale cd.RfPcs column) purely for DISPLAY in the "rfpcs" output field.
+            # It is intentionally NOT subtracted in the balance formula below - see fix note.
+            if avail_reissue > 0:
+                calc_rfpcs = min(recpcs_raw if recpcs_raw > 0 else raw_pcs, avail_reissue)
                 reissue_map[f"{party}_{ser_key}"] = max(0.0, avail_reissue - calc_rfpcs)
+            else:
+                calc_rfpcs = raw_rfpcs
 
+            # Formula (verified with user data: JOB expected total 7617):
+            # JOB rows:   raw_pcs = total received from reprocess
+            #             recpcs_raw = pcs re-issued/transferred further
+            #             Balance = raw_pcs - recpcs_raw  (38213 - 30596 = 7617 ✓)
+            # PLAIN rows: plainpcs as source, minus any re-issued (calc_rfpcs)
             if is_plain_type:
-                pcs = plainpcs if plainpcs > 0 else (recpcs_raw if recpcs_raw > 0 else raw_pcs)
-                calc_plain = plainpcs
-                calc_balpcs = max(0.0, pcs - calc_rfpcs)
+                # PLAIN/RETURN/SECOND/SHT/DEMAGE
+                calc_plain = plainpcs if plainpcs > 0 else raw_pcs
+                pcs = 0.0
+                calc_recpcs = 0.0
+                # PLAIN mein bhi re-issue deduct karo (user confirmed)
+                calc_balpcs = max(0.0, calc_plain - calc_rfpcs)
                 out_jobtype = "PLAIN"
             else:
-                pcs = recpcs_raw if recpcs_raw > 0 else raw_pcs
-                calc_plain = plainpcs
-                calc_balpcs = max(0.0, pcs - calc_rfpcs)
+                # JOB: total received - re-issued = balance
+                pcs = raw_pcs
+                calc_recpcs = recpcs_raw
+                calc_plain = 0.0
+                # balpcs = raw_pcs - recpcs_raw (RecPcs = re-issued pcs in this ERP)
+                calc_balpcs = max(0.0, pcs - recpcs_raw)
                 out_jobtype = "JOB"
 
             # Filter by JobType: JOB vs PLAIN vs ALL
@@ -1033,8 +1067,9 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
             elif jt_filter == 'PLAIN' and not is_plain_type:
                 continue
 
+            # Sale Item (NewItem) check: If Sale Item is filled, it has NO link with reprocess stock
             new_item_val = str(r['NewItem'] or "").strip().upper()
-            if new_item_val:
+            if new_item_val and new_item_val != '0':
                 continue
 
             if calc_balpcs <= 0:
@@ -1062,7 +1097,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 "pcs": pcs,
                 "plainpcs": calc_plain,
                 "rfpcs": calc_rfpcs,
-                "recpcs": recpcs_raw,
+                "recpcs": calc_recpcs,
                 "secpcs": secpcs,
                 "shtpcs": shtpcs,
                 "spcs": spcs,
