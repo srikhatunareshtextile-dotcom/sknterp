@@ -3689,8 +3689,7 @@ function filterAndRenderAllStock() {
     const item = document.getElementById("jr-item")?.value || "";
     const inwType = document.getElementById("jr-inw-type")?.value || "All";
     
-    const checkedJt = Array.from(document.querySelectorAll('.jr-jt-cb:checked')).map(cb => cb.value);
-    const jobTypeParam = checkedJt.length > 0 ? checkedJt.join(",") : "All";
+    const jobTypeParam = document.getElementById("jr-jobtype")?.value || "All";
 
     const statusEl = document.querySelector('input[name="jr_status"]:checked');
     const statusVal = statusEl ? statusEl.value : "Pending";

@@ -260,7 +260,8 @@ def get_shared_stock_data(sql_settings, include_opening=False, conn=None, item_t
 
     Q_JOB_REPROCESS = f"""
     SELECT UPPER(LTRIM(RTRIM(ISNULL(i.GroupName, '')))) AS group_name,
-        SUM(CASE WHEN c.Mode='FR'
+        SUM(CASE WHEN c.Mode='FR' AND (c.JobType='JOB' OR c.JobType IS NULL OR c.JobType='')
+                 AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='')
                  THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
                            - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
                            - ISNULL(c.WastePcs,0)
@@ -275,7 +276,8 @@ def get_shared_stock_data(sql_settings, include_opening=False, conn=None, item_t
     WHERE c.JobItem IS NOT NULL AND c.JobItem != ''
       AND c.Mode IN ('FI','FR')
     GROUP BY UPPER(LTRIM(RTRIM(ISNULL(i.GroupName, ''))))
-    HAVING SUM(CASE WHEN c.Mode='FR'
+    HAVING SUM(CASE WHEN c.Mode='FR' AND (c.JobType='JOB' OR c.JobType IS NULL OR c.JobType='')
+                    AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='')
                     THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
                               - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
                               - ISNULL(c.WastePcs,0)
@@ -863,8 +865,6 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
 
         if status == "Pending":
             return [r for r in rows if r.get('balpcs', 0) > 0 and r.get('stat') != 'C']
-        elif status == "Close":
-            return [r for r in rows if r['stat'] == 'C']
         return rows
     finally:
         try: conn.close()
@@ -873,8 +873,7 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
 def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", jobber="", item="", inw_type="", date_from="", date_to="", include_opening=False):
     """
     Fetch Job Reprocess report data from SQL Server CHALMAST (Mode = 'FR') + CHALDATA.
-    Excludes finished sale items (where cd.NewItem is filled with sale product) as they directly go to finish stock.
-    Computes rfpcs from re-issued new challans (Mode = 'FI', SrChr = 'R') and RF entries.
+    Matches desktop ERP calculations across all 5 benchmark modes (JOB, PLAIN, ALL, Opening Include / Exclude).
     """
     from app import get_sql_server_connection
     from collections import defaultdict
@@ -882,12 +881,10 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
     try:
         cur = conn.cursor()
 
-        # Step 1: Pre-fetch linked FI re-issues into Python dictionary (safe against SQL type conversions)
-        # NOTE: SrChr is NOT filtered here - a reissue can carry any SrChr (R, W, RF, S, X, etc).
-        # The link back to the original reprocess challan is established purely via
-        # RecSr/OrderNo/RefNo matching the FR challan's Serial - not via SrChr/JobType.
+        # Step 1: Pre-fetch linked FI re-issues into Python dictionary keyed by Party + Serial
         query_fi = """
             SELECT 
+                cm_i.Party,
                 cd_i.RecSr, cd_i.OrderNo, cd_i.RefNo,
                 ISNULL(cd_i.Pcs, 0) as pcs
             FROM CHALDATA cd_i
@@ -897,14 +894,15 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
         cur.execute(query_fi)
         reissue_map = defaultdict(float)
         for r in cur.fetchall():
-            pcs = float(r[3] or 0)
-            for val in (r[0], r[1], r[2]):
+            party = str(r[0] or "").strip().upper()
+            pcs = float(r[4] or 0)
+            for val in (r[1], r[2], r[3]):
                 if val is not None:
                     try:
                         s_val = str(val).strip()
                         if s_val and s_val != '0':
                             ser_num = str(int(float(s_val)))
-                            reissue_map[ser_num] += pcs
+                            reissue_map[f"{party}_{ser_num}"] += pcs
                             break
                     except:
                         pass
@@ -937,26 +935,13 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 ISNULL(cd.SPcs, 0) as spcs,
                 ISNULL(cd.RetPcs, 0) as retpcs,
                 ISNULL(cd.WastePcs, 0) as wastepcs,
-                cd.NewItem
+                cd.NewItem,
+                cm.Date
             FROM CHALMAST cm
             JOIN CHALDATA cd ON cm.EntryId = cd.ControlId
             WHERE cm.Mode = 'FR'
         """
         params = []
-
-        if job_type:
-            if isinstance(job_type, list):
-                jt_list = [j.strip() for j in job_type if j and str(j).strip() and str(j).strip() != "All"]
-            else:
-                jt_list = [j.strip() for j in str(job_type).split(",") if j.strip() and j.strip() != "All"]
-
-            if len(jt_list) == 1:
-                select_part += " AND cd.JobType = ?"
-                params.append(jt_list[0])
-            elif len(jt_list) > 1:
-                placeholders = ",".join(["?"] * len(jt_list))
-                select_part += f" AND cd.JobType IN ({placeholders})"
-                params.extend(jt_list)
 
         if inw_type and inw_type != "All":
             select_part += " AND cd.InwType = ?"
@@ -970,205 +955,137 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
             st = f"%{item.strip()}%"
             params.extend([st, st, st])
 
-        df_parsed = _parse_date_param(date_from)
-        if df_parsed and str(status).strip().upper() not in ("PENDING", "P"):
-            select_part += " AND cm.Date >= ?"
-            params.append(df_parsed)
-
         dt_parsed = _parse_date_param(date_to)
         if dt_parsed:
             select_part += " AND cm.Date < DATEADD(day, 1, ?)"
             params.append(dt_parsed)
-
-        open_rows = []
-        if include_opening and df_parsed:
-            open_query = """
-                SELECT 
-                    ISNULL(cm.Party, '') as jobber,
-                    COALESCE(NULLIF(cd.JobItem, ''), cd.ItemName, '') as jobitem,
-                    ISNULL(cd.JobType, '') as jobtype,
-                    SUM(ISNULL(cd.Pcs, 0)) as pcs,
-                    -- Same principle: don't force balance to 0 just because Stat='C' says so
-                    -- (Stat may be stale/not updated) - use the actual computed balance.
-                    SUM(CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) END) as balpcs
-                FROM CHALMAST cm
-                JOIN CHALDATA cd ON cm.EntryId = cd.ControlId
-                WHERE cm.Mode = 'FR'
-                AND cm.Date < ?
-                AND (cd.Stat = 'P' OR cd.Stat = '' OR cd.Stat IS NULL OR cd.BalPcs > 0 OR (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) > 0)
-            """
-            open_params = [df_parsed]
-            if job_type:
-                jt_list = [j.strip() for j in str(job_type).split(",") if j.strip() and j.strip() != "All"]
-                if len(jt_list) == 1:
-                    open_query += " AND cd.JobType = ?"
-                    open_params.append(jt_list[0])
-                elif len(jt_list) > 1:
-                    placeholders = ",".join(["?"] * len(jt_list))
-                    open_query += f" AND cd.JobType IN ({placeholders})"
-                    open_params.extend(jt_list)
-            if inw_type and inw_type != "All":
-                open_query += " AND cd.InwType = ?"
-                open_params.append(inw_type.strip())
-            if jobber:
-                open_query += " AND cm.Party LIKE ?"
-                open_params.append(f"%{jobber.strip()}%")
-            if item:
-                open_query += " AND (cd.JobItem LIKE ? OR cd.ItemName LIKE ? OR cd.GroupName LIKE ?)"
-                st = f"%{item.strip()}%"
-                open_params.extend([st, st, st])
-            open_query += " GROUP BY cm.Party, cd.JobItem, cd.ItemName, cd.JobType HAVING SUM(CASE WHEN ISNULL(cd.BalPcs,0) > 0 THEN cd.BalPcs ELSE (ISNULL(cd.Pcs,0) - (ISNULL(cd.RfPcs,0)+ISNULL(cd.PlainPcs,0)+ISNULL(cd.RecPcs,0)+ISNULL(cd.SecPcs,0)+ISNULL(cd.ShtPcs,0)+ISNULL(cd.SPcs,0))) END) <> 0 ORDER BY jobber, jobitem"
-            cur.execute(open_query, open_params)
-            for r in cur.fetchall():
-                b_pcs = float(r[4] or 0)
-                if b_pcs > 0:
-                    open_rows.append({
-                        "issno": "OPG",
-                        "recsr": "OPG",
-                        "date": "Opening",
-                        "jobber": str(r[0]).strip() if r[0] else "",
-                        "jobitem": str(r[1]).strip() if r[1] else "",
-                        "pcs": float(r[3] or 0),
-                        "plainpcs": 0,
-                        "rfpcs": 0,
-                        "recpcs": 0,
-                        "secpcs": 0,
-                        "shtpcs": 0,
-                        "spcs": 0,
-                        "balpcs": b_pcs,
-                        "rate": 0,
-                        "jobtype": str(r[2]).strip() if r[2] else "",
-                        "stat": "O",
-                        "inwtype": "",
-                        "agent": "",
-                        "lotno": "",
-                        "series": "",
-                        "itemname": "",
-                        "is_opening": True
-                    })
 
         select_part += " ORDER BY cm.Date ASC, cm.Serial ASC"
         cur.execute(select_part, params)
         cols = [d[0] for d in cur.description]
         raw_db_rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-        # Sequential allocation of reissue_pcs per serial
-        grouped_fr = defaultdict(list)
+        # Process opening mode and year boundary
+        df_parsed = _parse_date_param(date_from)
+        year_boundary = df_parsed if df_parsed else "2026-04-01"
+
+        inc_op_str = str(include_opening).strip().lower()
+        if inc_op_str in ("false", "0", "no"):
+            op_mode = "NO"
+        elif inc_op_str in ("only"):
+            op_mode = "ONLY"
+        else:
+            op_mode = "WITH"
+
+        parsed_rows = []
         for r in raw_db_rows:
+            d_val = r['Date']
+            d_str = str(d_val)[:10] if d_val else ""
+            is_opening = bool(d_str and d_str < year_boundary)
+
+            # Filtering based on Opening Mode
+            if op_mode == "NO" and is_opening:
+                continue
+            elif op_mode == "ONLY" and not is_opening:
+                continue
+
+            jtype_raw = str(r['JobType'] or "").strip().upper()
+            is_plain_type = jtype_raw in ('PLAIN', 'RETURN', 'SECOND', 'DEMAGE', 'SHT')
+
+            party = str(r['Party'] or "").strip().upper()
             ser = r['Serial']
             try:
                 ser_key = str(int(float(ser))) if ser is not None else ""
             except:
                 ser_key = str(ser).strip() if ser else ""
-            grouped_fr[ser_key].append(r)
 
-        fr_parsed_rows = []
-        for ser_key, rows_list in grouped_fr.items():
-            avail_reissue = reissue_map.get(ser_key, 0.0)
+            avail_reissue = reissue_map.get(f"{party}_{ser_key}", 0.0)
 
-            for r in rows_list:
-                pcs = float(r['pcs'] or 0)
-                plainpcs = float(r['plainpcs'] or 0)
-                raw_rfpcs = float(r['raw_rfpcs'] or 0)
-                raw_balpcs = float(r['raw_balpcs'] or 0)
-                recpcs_raw = float(r['recpcs_raw'] or 0)
-                secpcs = float(r['secpcs'] or 0)
-                shtpcs = float(r['shtpcs'] or 0)
-                spcs = float(r['spcs'] or 0)
-                retpcs = float(r['retpcs'] or 0)
-                wastepcs = float(r['wastepcs'] or 0)
-                
-                order_no = str(r['OrderNo']).strip() if r['OrderNo'] and str(r['OrderNo']).strip() != '0' else ""
-                ref_no = str(r['RefNo']).strip() if r['RefNo'] and str(r['RefNo']).strip() != '0' else ""
-                serial_str = str(r['Serial']).strip() if r['Serial'] is not None else ""
-                sr_chr = str(r['SrChr']).strip() if r['SrChr'] else ""
-                
-                main_no = order_no or ref_no or serial_str
-                issno = (main_no + ' ' + sr_chr).strip()
+            raw_pcs = float(r['pcs'] or 0)
+            plainpcs = float(r['plainpcs'] or 0)
+            raw_rfpcs = float(r['raw_rfpcs'] or 0)
+            recpcs_raw = float(r['recpcs_raw'] or 0)
+            secpcs = float(r['secpcs'] or 0)
+            shtpcs = float(r['shtpcs'] or 0)
+            spcs = float(r['spcs'] or 0)
+            retpcs = float(r['retpcs'] or 0)
+            wastepcs = float(r['wastepcs'] or 0)
 
-                rec_sr = str(r['RecSr']).strip() if r['RecSr'] and str(r['RecSr']).strip() != '0' else serial_str
-                recsr = sr_chr + rec_sr
+            calc_rfpcs = raw_rfpcs if raw_rfpcs > 0 else (min(recpcs_raw if recpcs_raw > 0 else raw_pcs, avail_reissue) if avail_reissue > 0 else 0.0)
+            if avail_reissue > 0 and raw_rfpcs <= 0:
+                reissue_map[f"{party}_{ser_key}"] = max(0.0, avail_reissue - calc_rfpcs)
 
-                jtype_str = str(r['JobType']).strip().upper() if r['JobType'] else ""
-                raw_plain_val = float(r['plainpcs'] or 0)
-                if jtype_str in ('RETURN', 'SECOND', 'DEMAGE', 'SHT'):
-                    pcs = 0.0
-                    plainpcs = raw_plain_val if raw_plain_val > 0 else float(r['pcs'] or 0)
-                    calc_rfpcs = raw_rfpcs
-                    calc_recpcs = recpcs_raw
-                    calc_balpcs = plainpcs + calc_rfpcs + calc_recpcs
-                else:
-                    pcs = float(r['pcs'] or 0)
-                    plainpcs = raw_plain_val
-                    if raw_rfpcs > 0:
-                        calc_rfpcs = raw_rfpcs
-                        calc_recpcs = recpcs_raw
-                    elif avail_reissue > 0:
-                        calc_rfpcs = min(pcs, avail_reissue)
-                        avail_reissue -= calc_rfpcs
-                        calc_recpcs = recpcs_raw
-                    else:
-                        calc_rfpcs = 0.0
-                        calc_recpcs = recpcs_raw
+            if is_plain_type:
+                pcs = plainpcs if plainpcs > 0 else (recpcs_raw if recpcs_raw > 0 else raw_pcs)
+                calc_plain = plainpcs
+                calc_balpcs = max(0.0, pcs - calc_rfpcs)
+                out_jobtype = "PLAIN"
+            else:
+                pcs = recpcs_raw if recpcs_raw > 0 else raw_pcs
+                calc_plain = plainpcs
+                calc_balpcs = max(0.0, pcs - calc_rfpcs)
+                out_jobtype = "JOB"
 
-                    total_returned = calc_rfpcs + plainpcs + calc_recpcs + spcs + secpcs + retpcs + shtpcs + wastepcs
-                    if total_returned > 0:
-                        calc_balpcs = max(0.0, pcs - total_returned)
-                    elif raw_balpcs > 0:
-                        calc_balpcs = raw_balpcs
-                    else:
-                        calc_balpcs = max(0.0, pcs)
+            # Filter by JobType: JOB vs PLAIN vs ALL
+            jt_filter = str(job_type or "All").strip().upper()
+            if jt_filter == 'JOB' and is_plain_type:
+                continue
+            elif jt_filter == 'PLAIN' and not is_plain_type:
+                continue
 
-                new_item_val = str(r['NewItem']).strip().upper() if r['NewItem'] else ""
-                is_sale_item_filled = bool(new_item_val and new_item_val != 'RF')
+            new_item_val = str(r['NewItem'] or "").strip().upper()
+            if new_item_val:
+                continue
 
-                # Status decided purely from the CALCULATED balpcs - not from the DB's
-                # own Stat column, which may not always be kept up to date manually.
-                # BalPcs = 0 simply means Closed, no matter what Stat says.
-                if is_sale_item_filled or calc_balpcs <= 0:
-                    stat = 'C'
-                    if is_sale_item_filled:
-                        calc_balpcs = 0.0
-                else:
-                    stat = 'P'
+            if calc_balpcs <= 0:
+                stat = 'C'
+            else:
+                stat = 'P'
 
-                fr_parsed_rows.append({
-                    "issno": issno,
-                    "recsr": recsr,
-                    "date": r['date_str'] or "",
-                    "jobber": str(r['Party']).strip() if r['Party'] else "",
-                    "jobitem": str(r['JobItem']).strip() if r['JobItem'] else (str(r['ItemName']).strip() if r['ItemName'] else ""),
-                    "pcs": pcs,
-                    "plainpcs": plainpcs,
-                    "rfpcs": calc_rfpcs,
-                    "recpcs": calc_recpcs,
-                    "secpcs": secpcs,
-                    "shtpcs": shtpcs,
-                    "spcs": spcs,
-                    "retpcs": retpcs,
-                    "wastepcs": wastepcs,
-                    "balpcs": calc_balpcs,
-                    "rate": float(r['rate'] or 0),
-                    "jobtype": str(r['JobType']).strip() if r['JobType'] else "",
-                    "stat": stat,
-                    "inwtype": str(r['InwType']).strip() if r['InwType'] else "",
-                    "agent": str(r['Agent']).strip() if r['Agent'] else "",
-                    "lotno": str(r['LotNo']).strip() if r['LotNo'] else "",
-                    "series": sr_chr,
-                    "itemname": str(r['ItemName']).strip() if r['ItemName'] else "",
-                    "is_opening": False
-                })
+            order_no = str(r['OrderNo']).strip() if r['OrderNo'] and str(r['OrderNo']).strip() != '0' else ""
+            ref_no = str(r['RefNo']).strip() if r['RefNo'] and str(r['RefNo']).strip() != '0' else ""
+            serial_str = str(r['Serial']).strip() if r['Serial'] is not None else ""
+            sr_chr = str(r['SrChr']).strip() if r['SrChr'] else ""
+            
+            main_no = order_no or ref_no or serial_str
+            issno = (main_no + ' ' + sr_chr).strip()
 
-        rows = open_rows + fr_parsed_rows
+            rec_sr = str(r['RecSr']).strip() if r['RecSr'] and str(r['RecSr']).strip() != '0' else serial_str
+            recsr = sr_chr + rec_sr
+
+            parsed_rows.append({
+                "issno": issno,
+                "recsr": recsr,
+                "date": r['date_str'] or "",
+                "jobber": str(r['Party']).strip() if r['Party'] else "",
+                "jobitem": str(r['JobItem']).strip() if r['JobItem'] else (str(r['ItemName']).strip() if r['ItemName'] else ""),
+                "pcs": pcs,
+                "plainpcs": calc_plain,
+                "rfpcs": calc_rfpcs,
+                "recpcs": recpcs_raw,
+                "secpcs": secpcs,
+                "shtpcs": shtpcs,
+                "spcs": spcs,
+                "retpcs": retpcs,
+                "wastepcs": wastepcs,
+                "balpcs": calc_balpcs,
+                "rate": float(r['rate'] or 0),
+                "jobtype": out_jobtype,
+                "stat": stat,
+                "inwtype": str(r['InwType']).strip() if r['InwType'] else "",
+                "agent": str(r['Agent']).strip() if r['Agent'] else "",
+                "lotno": str(r['LotNo']).strip() if r['LotNo'] else "",
+                "series": sr_chr,
+                "itemname": str(r['ItemName']).strip() if r['ItemName'] else "",
+                "is_opening": is_opening
+            })
 
         st_upper = str(status).strip().upper()
         if st_upper in ("PENDING", "P"):
-            return [r for r in rows if r.get('balpcs', 0) > 0 and r.get('stat') != 'C']
+            return [r for r in parsed_rows if r.get('balpcs', 0) > 0 and r.get('stat') != 'C']
         elif st_upper in ("CLOSED", "CLOSE", "C"):
-            return [r for r in rows if r.get('stat') == 'C' or r.get('balpcs', 0) <= 0]
-        return rows
+            return [r for r in parsed_rows if r.get('stat') == 'C' or r.get('balpcs', 0) <= 0]
+        return parsed_rows
     finally:
         try: conn.close()
         except: pass
-
-

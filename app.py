@@ -2639,7 +2639,13 @@ def api_job_reprocess_report():
     status_filter = request.args.get("status", "Pending").strip()
     jobber_filter = request.args.get("jobber", "").strip().upper()
     item_filter = request.args.get("item", "").strip().upper()
-    include_opening = request.args.get("include_opening", "false").strip().lower() in ("true", "1", "yes")
+    inc_op_raw = request.args.get("include_opening", "false").strip().lower()
+    if inc_op_raw in ("only"):
+        op_param = "only"
+    elif inc_op_raw in ("true", "1", "yes", "all", "with"):
+        op_param = "true"
+    else:
+        op_param = "false"
 
     # === CLOUD FALLBACK ===
     if is_cloud_mode() or try_import_pyodbc() is None:
@@ -2649,16 +2655,31 @@ def api_job_reprocess_report():
         all_rows = snap.get("reports", {}).get("reprocess_stock", [])
         data = []
         for rp in all_rows:
-            if not include_opening and rp.get("is_opening"):
+            is_op = bool(rp.get("is_opening"))
+            if op_param == "false" and is_op:
                 continue
+            elif op_param == "only" and not is_op:
+                continue
+
+            new_item_val = str(rp.get("newitem", "") or "").strip().upper()
+            if new_item_val:
+                continue
+
             item_name = str(rp.get("itemname", "") or "").strip().upper()
+            jitem_name = str(rp.get("jobitem", "") or "").strip().upper()
             jbr = str(rp.get("jobber", "") or "").strip().upper()
             jtype = str(rp.get("jobtype", "") or "").strip().upper()
-            if item_filter and item_filter not in item_name:
+            
+            if item_filter and (item_filter not in item_name and item_filter not in jitem_name):
                 continue
             if jobber_filter and jobber_filter not in jbr:
                 continue
-            if job_type and job_type.upper() != "ALL" and jtype != job_type.upper():
+
+            is_plain_row = jtype in ('PLAIN', 'RETURN', 'SECOND', 'DEMAGE', 'SHT')
+            jt_up = str(job_type or "All").strip().upper()
+            if jt_up == "JOB" and is_plain_row:
+                continue
+            elif jt_up == "PLAIN" and not is_plain_row:
                 continue
 
             # Filter by status: Pending vs Closed vs All
@@ -2672,15 +2693,14 @@ def api_job_reprocess_report():
                     continue
 
             data.append(rp)
-        non_opening = [r for r in data if not r.get("is_opening")]
         def safe_sum(lst, key):
             return sum(float(r.get(key, 0) or 0) for r in lst)
         return jsonify({
             "status": "success",
             "total_rows": len(data),
-            "total_pcs": safe_sum(non_opening, "pcs"),
-            "total_plainpcs": safe_sum(non_opening, "plainpcs"),
-            "total_rfpcs": safe_sum(non_opening, "rfpcs"),
+            "total_pcs": safe_sum(data, "pcs"),
+            "total_plainpcs": safe_sum(data, "plainpcs"),
+            "total_rfpcs": safe_sum(data, "rfpcs"),
             "total_balpcs": safe_sum(data, "balpcs"),
             "from_snapshot": True,
             "snapshot_time": snap.get("sync_time", ""),
@@ -2701,15 +2721,14 @@ def api_job_reprocess_report():
             inw_type=inw_type,
             date_from=date_from,
             date_to=date_to,
-            include_opening=include_opening
+            include_opening=op_param
         )
-        non_opening = [r for r in data if not r.get("is_opening")]
         return jsonify({
             "status": "success",
             "total_rows": len(data),
-            "total_pcs": sum(r["pcs"] for r in non_opening),
-            "total_plainpcs": sum(r["plainpcs"] for r in non_opening),
-            "total_rfpcs": sum(r["rfpcs"] for r in non_opening),
+            "total_pcs": sum(r["pcs"] for r in data),
+            "total_plainpcs": sum(r["plainpcs"] for r in data),
+            "total_rfpcs": sum(r["rfpcs"] for r in data),
             "total_balpcs": sum(r["balpcs"] for r in data),
             "data": data
         })
