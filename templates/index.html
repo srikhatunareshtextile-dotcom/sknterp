@@ -135,9 +135,17 @@
           <i class="fa-solid fa-circle-plus"></i>
           <span>New Packing Slip</span>
         </button>
+        <button class="action-btn" id="quick-view-slips">
+          <i class="fa-solid fa-boxes-stacked"></i>
+          <span>Packing Slips</span>
+        </button>
         <button class="action-btn" id="quick-view-req">
           <i class="fa-solid fa-chart-pie"></i>
           <span>Procurement Report</span>
+        </button>
+        <button class="action-btn" id="quick-view-oos">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span>OOS Report</span>
         </button>
         <button class="action-btn" id="quick-job-issue">
           <i class="fa-solid fa-boxes-packing"></i>
@@ -146,6 +154,30 @@
         <button class="action-btn" id="quick-job-reprocess">
           <i class="fa-solid fa-rotate-left"></i>
           <span>Job Reprocess</span>
+        </button>
+        <button class="action-btn" id="quick-all-stock">
+          <i class="fa-solid fa-warehouse"></i>
+          <span>All Stock</span>
+        </button>
+        <button class="action-btn" id="quick-purchase-stock">
+          <i class="fa-solid fa-cart-shopping"></i>
+          <span>Purchase Stock</span>
+        </button>
+        <button class="action-btn" id="quick-bill-report">
+          <i class="fa-solid fa-file-invoice"></i>
+          <span>Bill Report</span>
+        </button>
+        <button class="action-btn" id="quick-order-details">
+          <i class="fa-solid fa-clipboard-list"></i>
+          <span>Order Details</span>
+        </button>
+        <button class="action-btn" id="quick-folding-payment">
+          <i class="fa-solid fa-money-bill-wave"></i>
+          <span>Folding Payment</span>
+        </button>
+        <button class="action-btn" id="quick-edit-settings">
+          <i class="fa-solid fa-gear"></i>
+          <span>Settings</span>
         </button>
       </div>
 
@@ -163,6 +195,14 @@
             <option value="custom">Custom Text Message</option>
             <option value="req">Latest REQ Procurement Report</option>
             <option value="oos">Latest OOS Report</option>
+            <option value="slips">Packing Slips List</option>
+            <option value="all-stock">All Stock Report</option>
+            <option value="purchase-stock">Purchase Stock Report</option>
+            <option value="bill-report">Bill Report</option>
+            <option value="order-details">Order Details Report</option>
+            <option value="job-issue">Job Issue Report</option>
+            <option value="job-reprocess">Job Reprocess Report</option>
+            <option value="folding-payment">Folding Payment Report</option>
           </select>
         </div>
 
@@ -220,6 +260,21 @@
         </div>
       </div>
 
+      <div class="slip-summary-card">
+        <div class="summary-stat">
+          <span class="summary-stat-value" id="detail-total-items">0</span>
+          <span class="summary-stat-label">Items</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-value" id="detail-total-groups">0</span>
+          <span class="summary-stat-label">Groups</span>
+        </div>
+        <div class="summary-stat">
+          <span class="summary-stat-value" id="detail-summary-total-pcs">0</span>
+          <span class="summary-stat-label">Total Pcs</span>
+        </div>
+      </div>
+
       <div class="slip-meta-card">
         <div class="meta-row">
           <span class="meta-label">Slip No:</span>
@@ -237,17 +292,33 @@
           <span class="meta-label">Group Name:</span>
           <span id="detail-group-name" class="meta-value">-</span>
         </div>
-        <div class="meta-row">
+        <div class="meta-row" id="detail-haste-row">
           <span class="meta-label">Haste (Broker):</span>
           <span id="detail-haste" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Agent Name:</span>
+          <span id="detail-agent" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Station:</span>
+          <span id="detail-station" class="meta-value">-</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Transport:</span>
+          <span id="detail-transport" class="meta-value">-</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">View Type:</span>
           <span id="detail-view-type" class="meta-value badge badge-info">-</span>
         </div>
-        <div class="meta-row">
+        <div class="meta-row" id="detail-remarks-row">
           <span class="meta-label">Remarks:</span>
           <span id="detail-remarks" class="meta-value italic">-</span>
+        </div>
+        <div class="meta-row" style="border-top: 1px solid var(--bg-card-border); margin-top: 6px; padding-top: 10px;">
+          <span class="meta-label" style="font-weight: 700;">Total Packed Pcs:</span>
+          <span id="detail-total-pcs" class="meta-value font-bold" style="color: #1e70e6; font-size: 15px;">0</span>
         </div>
       </div>
 
@@ -1026,23 +1097,25 @@
                 <label style="font-weight:700; color:var(--text-main);">JobType Filter</label>
                 <select id="jr-jobtype" style="padding:8px 12px; border-radius:8px; border:1px solid var(--bg-card-border); background:var(--bg-card); color:var(--text-main); font-weight:600;">
                   <option value="All" selected>All (JOB + PLAIN)</option>
-                  <option value="JOB">JOB</option>
-                  <option value="PLAIN">PLAIN (RETURN)</option>
+                  <option value="JOB">JOB Only</option>
+                  <option value="PLAIN">PLAIN (RETURN) Only</option>
                 </select>
               </div>
-              <div class="form-group" style="display:flex; flex-direction:column; gap:10px; flex:1;">
-                <div style="display:flex; align-items:center; gap:12px;">
-                  <label style="font-weight:700; margin-bottom:0; min-width:110px;">Pending / Close:</label>
-                  <div style="display:flex; gap:16px; align-items:center;">
-                    <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="Pending"> Pending</label>
-                    <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="Close"> Close</label>
-                    <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="All" checked> All</label>
-                  </div>
+              <div class="form-group" style="flex:1;">
+                <label style="font-weight:700; color:var(--text-main);">Opening Stock Mode</label>
+                <select id="jr-opening-mode" style="padding:8px 12px; border-radius:8px; border:1px solid var(--bg-card-border); background:var(--bg-card); color:var(--text-main); font-weight:600;">
+                  <option value="false" selected>Without Opening (Current Year Only)</option>
+                  <option value="true">Include Opening (Current Year + Opening)</option>
+                  <option value="only">Only Opening Stock</option>
+                </select>
+              </div>
+              <div class="form-group" style="display:flex; flex-direction:column; gap:6px; flex:1;">
+                <label style="font-weight:700; color:var(--text-main);">Status Filter</label>
+                <div style="display:flex; gap:16px; align-items:center; padding:6px 0;">
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="Pending" checked> Pending</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="Close"> Close</label>
+                  <label style="cursor:pointer; display:flex; align-items:center; gap:5px; font-weight:600; color:var(--text-main);"><input type="radio" name="jr_status" value="All"> All</label>
                 </div>
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:700; color:var(--text-main); margin-bottom:0;">
-                  <input type="checkbox" id="jr-include-opening" style="width:18px; height:18px; cursor:pointer;">
-                  <span>Include Opening Stock</span>
-                </label>
               </div>
             </div>
             <button class="btn btn-primary btn-block" id="btn-load-job-reprocess" style="margin-top:12px"><i class="fa-solid fa-bolt"></i> Load Job Reprocess Report</button>
@@ -1353,6 +1426,18 @@
           <select id="slip-haste">
             <option value="">Select Haste (Optional)</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>Agent Name</label>
+          <input type="text" id="slip-agent" placeholder="Enter Agent Name (Optional)">
+        </div>
+        <div class="form-group">
+          <label>Station</label>
+          <input type="text" id="slip-station" placeholder="Enter Station (Optional)">
+        </div>
+        <div class="form-group">
+          <label>Transport</label>
+          <input type="text" id="slip-transport" placeholder="Enter Transport (Optional)">
         </div>
         <div class="form-group">
           <label>Remarks</label>
