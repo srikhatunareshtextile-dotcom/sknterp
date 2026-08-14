@@ -8,7 +8,7 @@
     "allowed_tabs": [
       "all"
     ],
-    "last_login": "09/08/2026 11:25 AM"
+    "last_login": "14/08/2026 06:10 PM"
   },
   {
     "user_id": "supervisor",
@@ -42,7 +42,7 @@
     "allowed_tabs": [
       "all"
     ],
-    "last_login": "08/08/2026 09:10 PM"
+    "last_login": "14/08/2026 03:43 PM"
   },
   {
     "user_id": "shivam",
@@ -55,7 +55,8 @@
       "slips",
       "all-stock",
       "job-issue"
-    ]
+    ],
+    "last_login": "14/08/2026 06:25 PM"
   },
   {
     "user_id": "manjeet",
@@ -68,7 +69,8 @@
       "slips",
       "all-stock",
       "job-issue"
-    ]
+    ],
+    "last_login": "14/08/2026 05:37 PM"
   },
   {
     "user_id": "abhishek",
@@ -81,6 +83,21 @@
       "slips",
       "all-stock",
       "job-issue"
-    ]
+    ],
+    "last_login": "14/08/2026 04:07 PM"
+  },
+  {
+    "user_id": "sknt",
+    "username": "sknt",
+    "password": "Sknt@7285",
+    "name": "SKNT",
+    "role": "Staff",
+    "allowed_tabs": [
+      "home",
+      "slips",
+      "all-stock",
+      "job-issue"
+    ],
+    "last_login": "14/08/2026 06:11 PM"
   }
 ]
