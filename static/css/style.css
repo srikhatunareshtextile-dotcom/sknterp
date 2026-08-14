@@ -1099,6 +1099,44 @@ body {
   margin-bottom: 18px;
 }
 
+/* FEATURE: slip detail summary card (total items / groups / pcs) */
+.slip-summary-card {
+  display: flex;
+  justify-content: space-around;
+  background: linear-gradient(135deg, #1e70e6, #1558b8);
+  border-radius: 14px;
+  padding: 14px 8px;
+  margin-bottom: 14px;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.summary-stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.summary-stat-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Summary card is only useful on-screen; the print layout already has its
+   own meta grid + footer, so keep this out of the printed page. */
+@media print {
+  .slip-summary-card {
+    display: none !important;
+  }
+}
+
 .meta-row {
   display: flex;
   justify-content: space-between;
@@ -1217,6 +1255,23 @@ body {
 /* ════════════════════════════════════════════════ */
 /*                  PRINT OVERRIDES                 */
 /* ════════════════════════════════════════════════ */
+/* BUG FIX: print-only tables must stay hidden on screen; they were only
+   ever shown via the @media print rule below, but there was no default
+   (non-print) rule hiding them, so several of them (slip/req/oos/all-stock/
+   od/pur-stock) rendered visibly under the normal item cards. */
+.print-only-table-container {
+  display: none;
+}
+
+/* BUG FIX: .auto-filled class was being applied by JS but had no visual
+   style defined, so the "Auto-filled" badge text was the only feedback.
+   Give the field itself a subtle highlight so it's obvious at a glance. */
+input.auto-filled {
+  background-color: rgba(16, 185, 129, 0.08);
+  border-color: #10b981 !important;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
 @media print {
   /* Hide interactive widgets, home grid, banners, header, nav bars, and default card lists */
   .list-container,
@@ -1360,6 +1415,67 @@ body {
 
   .print-meta-value {
     color: #000000 !important;
+  }
+
+  /* FEATURE: group-wise subtotal rows */
+  .print-group-subtotal-row td {
+    background-color: #eef2ff !important;
+    border-top: 1px solid #94a3b8 !important;
+    border-bottom: 1px solid #94a3b8 !important;
+    padding: 6px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* FEATURE: footer with print timestamp + counts */
+  .print-footer {
+    display: flex !important;
+    justify-content: space-between !important;
+    margin-top: 14px !important;
+    padding-top: 8px !important;
+    border-top: 1px dashed #cbd5e0 !important;
+    font-size: 10px !important;
+    color: #4a5568 !important;
+  }
+
+  /* FEATURE: signature line area */
+  .print-signature-row {
+    display: flex !important;
+    justify-content: space-between !important;
+    gap: 20px !important;
+    margin-top: 50px !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-signature-box {
+    flex: 1 !important;
+    text-align: center !important;
+    font-size: 11px !important;
+    color: #2d3748 !important;
+  }
+
+  .print-signature-line {
+    border-top: 1px solid #2d3748 !important;
+    margin-bottom: 6px !important;
+    height: 1px !important;
+  }
+
+  /* FEATURE: page-break handling for multi-page slips */
+  .print-table thead {
+    display: table-header-group !important;
+  }
+
+  .print-table tr {
+    page-break-inside: avoid !important;
+  }
+
+  .print-header {
+    page-break-after: avoid !important;
+  }
+
+  .print-total-row,
+  .print-group-subtotal-row {
+    page-break-inside: avoid !important;
   }
 }
 
