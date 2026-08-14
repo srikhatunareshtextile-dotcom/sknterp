@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import sys
+import time
 import threading
 from datetime import datetime
 from collections import defaultdict
@@ -125,6 +126,7 @@ def save_group_images_map(data_map):
         print(f"Error saving group_images.json: {e}")
 
 ACTIVITY_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "activity_log.json")
+ACTIVITY_LOG_LOCK = threading.Lock()
 
 def load_activity_logs():
     if os.path.exists(ACTIVITY_LOG_FILE):
@@ -142,20 +144,30 @@ def log_user_activity(action, module, details):
         if has_request_context():
             user_id = session.get('user_id', 'system')
             user_name = session.get('name', user_id)
-        now_str = datetime.now().strftime("%d/%m/%Y %I:%M:%S %p")
+        now_dt = datetime.now()
+        now_str = now_dt.strftime("%d/%m/%Y %I:%M:%S %p")
         log_entry = {
             "timestamp": now_str,
+            # Store a sortable ISO timestamp alongside the display string so
+            # the log can always be re-sorted reliably (12-hour display
+            # strings like "03:45:12 PM" don't sort correctly as plain text).
+            "ts_sort": now_dt.strftime("%Y-%m-%d %H:%M:%S.%f"),
             "user_id": user_id,
             "user_name": user_name,
             "action": action,
             "module": module,
             "details": details
         }
-        logs = load_activity_logs()
-        logs.insert(0, log_entry)
-        logs = logs[:500]  # Keep last 500 actions
-        with open(ACTIVITY_LOG_FILE, "w") as f:
-            json.dump(logs, f, indent=2)
+        # Read-modify-write is done under a lock to avoid two near-simultaneous
+        # activities racing each other and one silently overwriting the
+        # other's entry (which was making the log look out of order / like
+        # entries were randomly missing).
+        with ACTIVITY_LOG_LOCK:
+            logs = load_activity_logs()
+            logs.insert(0, log_entry)
+            logs = logs[:500]  # Keep last 500 actions
+            with open(ACTIVITY_LOG_FILE, "w") as f:
+                json.dump(logs, f, indent=2)
     except Exception as e:
         print(f"Error in log_user_activity: {e}")
 
@@ -298,7 +310,9 @@ def load_settings():
     try:
         init_local_db(local_db)
     except Exception as _e:
+        import traceback
         print(f"init_local_db note: {_e}")
+        traceback.print_exc()
 
     # Remote SQL Server configuration
     pyodbc_mod = try_import_pyodbc()
@@ -370,6 +384,32 @@ def init_local_db(db_path):
         c.execute("ALTER TABLE packing_slips ADD COLUMN haste TEXT DEFAULT ''")
     except Exception:
         pass
+    try:
+        c.execute("ALTER TABLE packing_slips ADD COLUMN agent TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE packing_slips ADD COLUMN station TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE packing_slips ADD COLUMN transport TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    # Diagnostic: confirm the packing_slips table actually has the new
+    # columns after migration. If "DATA NHI AA RHA HE" happens again, check
+    # the server console for this line — if agent/station/transport are
+    # missing from it, the migration didn't run against the DB file the
+    # server is actually using (e.g. server wasn't restarted after the code
+    # update, or a different local_db path is configured than expected).
+    try:
+        c.execute("PRAGMA table_info(packing_slips)")
+        cols = [row[1] for row in c.fetchall()]
+        print(f"[init_local_db] packing_slips columns: {cols}")
+    except Exception:
+        pass
+    conn.commit()
 
     # Migrate folding_payment_ticks if old table or index has UNIQUE(challan_no, worker_id) without process_type
     try:
@@ -618,6 +658,14 @@ def api_list_users():
 @admin_required
 def api_get_activity_logs():
     logs = load_activity_logs()
+    # Defensive sort — newest first — using the sortable ISO timestamp when
+    # present, falling back to the display timestamp for older log entries
+    # written before ts_sort existed. This guarantees the log always shows
+    # in the correct newest-to-oldest order even if entries were ever
+    # appended out of order (e.g. by a race between two quick actions).
+    def _sort_key(entry):
+        return entry.get("ts_sort") or entry.get("timestamp") or ""
+    logs = sorted(logs, key=_sort_key, reverse=True)
     return jsonify({"status": "success", "logs": logs})
 
 @app.route("/api/whatsapp_import/run", methods=["POST"])
@@ -1415,6 +1463,9 @@ def slips():
         view_type = data.get("view_type", "REQ").strip()
         remarks = data.get("remarks", "").strip()
         haste = data.get("haste", "").strip()
+        agent = data.get("agent", "").strip()
+        station = data.get("station", "").strip()
+        transport = data.get("transport", "").strip()
 
         if not party:
             return jsonify({"error": "Party name is required"}), 400
@@ -1453,9 +1504,9 @@ def slips():
                 slip_no = "1"
 
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        c.execute("""INSERT INTO packing_slips (slip_no, slip_date, party, group_name, view_type, created_at, remarks, haste)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                  (slip_no, slip_date, party, group_name, view_type, created_at, remarks, haste))
+        c.execute("""INSERT INTO packing_slips (slip_no, slip_date, party, group_name, view_type, created_at, remarks, haste, agent, station, transport)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (slip_no, slip_date, party, group_name, view_type, created_at, remarks, haste, agent, station, transport))
         slip_id = c.lastrowid
         conn.commit()
         conn.close()
@@ -2298,6 +2349,107 @@ def get_party_hastes(party_name):
     except Exception as e:
         print(f"Error loading hastes: {e}")
         return jsonify([])
+
+@app.route("/api/parties/<path:party_name>/details")
+def get_party_details(party_name):
+    """Auto-fetch Agent, Station, Transport from ORDERMST for a party."""
+    _, sql_settings = load_settings()
+    result = {"agent": "", "station": "", "transport": ""}
+
+    # === CLOUD FALLBACK ===
+    if is_cloud_mode() or try_import_pyodbc() is None:
+        snap = load_cloud_snapshot()
+        if snap:
+            ods = snap.get("reports", {}).get("order_details", [])
+            for od in ods:
+                p = str(od.get("party", "") or "").strip().upper()
+                if p == party_name.strip().upper():
+                    result["agent"] = str(od.get("agent", "") or "").strip()
+                    result["station"] = str(od.get("station", "") or "").strip()
+                    result["transport"] = str(od.get("transport", "") or "").strip()
+                    if result["agent"] or result["station"] or result["transport"]:
+                        break
+        return jsonify(result)
+    # === END CLOUD FALLBACK ===
+
+    try:
+        conn = get_sql_server_connection(sql_settings)
+        cur = conn.cursor()
+
+        # Dynamically detect Agent/Station/Transport column names in ORDERMST
+        cur.execute("""
+            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = 'ORDERMST'
+        """)
+        all_cols = [r[0] for r in cur.fetchall()]
+        all_cols_upper = {c.upper(): c for c in all_cols}
+
+        def detect_column(candidates):
+            for cand in candidates:
+                if cand.upper() in all_cols_upper:
+                    return all_cols_upper[cand.upper()]
+            # Fuzzy fallback
+            for col_upper, col_orig in all_cols_upper.items():
+                for cand in candidates:
+                    if cand.upper() in col_upper:
+                        return col_orig
+            return None
+
+        agent_col = detect_column(['Agent', 'AgentName', 'SalesAgent', 'Broker', 'Salesman', 'SalesmanName'])
+        station_col = detect_column(['Station', 'City', 'Destination', 'Place', 'Location', 'DeliveryStation'])
+        transport_col = detect_column(['Transport', 'TransportName', 'Carrier', 'TransporterName', 'Transporter', 'CourierName'])
+
+        # Build SELECT clause with detected columns
+        select_parts = []
+        if agent_col:
+            select_parts.append(f"ISNULL(m.[{agent_col}], '') AS agent_val")
+        else:
+            select_parts.append("'' AS agent_val")
+        if station_col:
+            select_parts.append(f"ISNULL(m.[{station_col}], '') AS station_val")
+        else:
+            select_parts.append("'' AS station_val")
+        if transport_col:
+            select_parts.append(f"ISNULL(m.[{transport_col}], '') AS transport_val")
+        else:
+            select_parts.append("'' AS transport_val")
+
+        select_clause = ', '.join(select_parts)
+        sql_pending = f"""
+            SELECT TOP 1 {select_clause}
+            FROM ORDERMST m
+            JOIN ORDERDET d ON m.OrderNo = d.OrderNo
+            WHERE m.Party = ? AND d.Status != 'C' AND d.Pcs - ISNULL(d.BillPcs, 0) > 0
+            ORDER BY m.Date DESC
+        """
+        cur.execute(sql_pending, (party_name,))
+        row = cur.fetchone()
+
+        # BUG FIX: previously if a party had no PENDING orders (e.g. all
+        # already billed/completed), no row came back and Agent/Station/
+        # Transport never auto-filled at all, even though the party's most
+        # recent order data existed. Fall back to the party's most recent
+        # order overall (any status) so auto-fill still works in that case.
+        if not row:
+            sql_any = f"""
+                SELECT TOP 1 {select_clause}
+                FROM ORDERMST m
+                WHERE m.Party = ?
+                ORDER BY m.Date DESC
+            """
+            cur.execute(sql_any, (party_name,))
+            row = cur.fetchone()
+
+        if row:
+            result["agent"] = str(row[0] or "").strip()
+            result["station"] = str(row[1] or "").strip()
+            result["transport"] = str(row[2] or "").strip()
+
+        conn.close()
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error fetching party details: {e}")
+        return jsonify(result)
 
 @app.route("/api/order_details")
 def get_order_details_endpoint():
@@ -3312,6 +3464,59 @@ def api_cloud_sync_status():
         "last_sync_time": cfg.get("last_sync_time") or (snap.get("sync_time") if snap else "Never"),
         "has_snapshot": snap is not None
     })
+
+
+# ---------------------------------------------------------------------------
+# Built-in Auto Sync background thread.
+#
+# Previously, automatic syncing only happened if the app was started via
+# Start_Mobile_Server.bat, which separately launches run_cloud_sync.py as its
+# own process alongside app.py. If the app was started any other way (running
+# `python app.py` directly, from an IDE, as a Windows service, or deployed to
+# Render/gunicorn), that second process never started and only the manual
+# "Sync" button worked. Starting the same loop as a background thread here
+# means auto-sync always runs together with the app itself, no matter how
+# it's launched — "manual sync ke saath saath auto sync bhi ho".
+# ---------------------------------------------------------------------------
+_auto_sync_thread_started = False
+
+def _auto_sync_loop():
+    from cloud_sync_utils import trigger_manual_sync, load_cloud_sync_config
+    print("[Auto Sync] Background auto-sync thread started.")
+    while True:
+        try:
+            cfg = load_cloud_sync_config()
+            interval_mins = cfg.get("auto_sync_interval_mins", 30)
+            if interval_mins < 5:
+                interval_mins = 5
+
+            if cfg.get("cloud_enabled", True):
+                local_db, sql_settings = load_settings()
+                res = trigger_manual_sync(sql_settings, local_db)
+                print(f"[Auto Sync] {datetime.now().strftime('%H:%M:%S')} - Sync result: {res.get('cloud_push_status')}")
+            time.sleep(interval_mins * 60)
+        except Exception as e:
+            print(f"[Auto Sync] Loop error: {e}")
+            time.sleep(300)  # retry after 5 mins on error
+
+def start_auto_sync_background_thread():
+    global _auto_sync_thread_started
+    if _auto_sync_thread_started:
+        return
+    _auto_sync_thread_started = True
+    t = threading.Thread(target=_auto_sync_loop, daemon=True)
+    t.start()
+
+# Start the thread as soon as the module loads (covers gunicorn/Render), but
+# guard against Flask's debug-mode reloader — with debug=True, Flask spawns
+# a watcher process AND a child worker process, both of which import this
+# module; without this guard the thread would start twice. WERKZEUG_RUN_MAIN
+# is only set to "true" inside the actual (child) worker process.
+if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    try:
+        start_auto_sync_background_thread()
+    except Exception as _e:
+        print(f"[Auto Sync] Failed to start background thread: {_e}")
 
 
 if __name__ == "__main__":

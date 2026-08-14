@@ -279,31 +279,17 @@ def get_shared_stock_data(sql_settings, include_opening=False, conn=None, item_t
     Q_JOB_REPROCESS = f"""
     SELECT UPPER(LTRIM(RTRIM(ISNULL(i.GroupName, '')))) AS group_name,
         SUM(CASE WHEN c.Mode='FR' AND (c.JobType='JOB' OR c.JobType IS NULL OR c.JobType='')
-                 AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='')
-                 THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
-                           - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
-                           - ISNULL(c.WastePcs,0)
-                 ELSE 0 END)
-      - SUM(CASE WHEN c.Mode='FI' AND (c.SrChr='R' OR c.SrChr LIKE '%R%')
-                 THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
-                           - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
-                           - ISNULL(c.WastePcs,0)
+                 AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='' OR LTRIM(RTRIM(c.NewItem))='0')
+                 THEN c.Pcs + ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0)
                  ELSE 0 END) AS job_reprocess_pcs
     FROM CHALDATA c
     LEFT JOIN {db_curr}.dbo.ITEMMST i ON c.JobItem = i.ItemName
     WHERE c.JobItem IS NOT NULL AND c.JobItem != ''
-      AND c.Mode IN ('FI','FR')
+      AND c.Mode = 'FR'
     GROUP BY UPPER(LTRIM(RTRIM(ISNULL(i.GroupName, ''))))
     HAVING SUM(CASE WHEN c.Mode='FR' AND (c.JobType='JOB' OR c.JobType IS NULL OR c.JobType='')
-                    AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='')
-                    THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
-                              - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
-                              - ISNULL(c.WastePcs,0)
-                    ELSE 0 END)
-         - SUM(CASE WHEN c.Mode='FI' AND (c.SrChr='R' OR c.SrChr LIKE '%R%')
-                    THEN c.Pcs - ISNULL(c.SPcs,0) - ISNULL(c.ShtPcs,0) - ISNULL(c.RetPcs,0)
-                              - ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0) - ISNULL(c.SecPcs,0)
-                              - ISNULL(c.WastePcs,0)
+                    AND (c.NewItem IS NULL OR LTRIM(RTRIM(c.NewItem))='' OR LTRIM(RTRIM(c.NewItem))='0')
+                    THEN c.Pcs + ISNULL(c.PlainPcs,0) - ISNULL(c.RfPcs,0)
                     ELSE 0 END) > 0
     """
 
@@ -891,41 +877,13 @@ def query_job_issue_report(sql_settings, status="Pending", jobber="", item="", i
 def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", jobber="", item="", inw_type="", date_from="", date_to="", include_opening=False):
     """
     Fetch Job Reprocess report data from SQL Server CHALMAST (Mode = 'FR') + CHALDATA.
-    Matches desktop ERP calculations across all 5 benchmark modes (JOB, PLAIN, ALL, Opening Include / Exclude).
+    Matches desktop ERP calculations: BALPCS = (PCS + PLAINPCS) - RFPCS.
     """
     from app import get_sql_server_connection
-    from collections import defaultdict
     conn = get_sql_server_connection(sql_settings)
     try:
         cur = conn.cursor()
 
-        # Step 1: Pre-fetch linked FI re-issues into Python dictionary keyed by Party + Serial
-        query_fi = """
-            SELECT 
-                cm_i.Party,
-                cd_i.RecSr, cd_i.OrderNo, cd_i.RefNo,
-                ISNULL(cd_i.Pcs, 0) as pcs
-            FROM CHALDATA cd_i
-            JOIN CHALMAST cm_i ON cd_i.ControlId = cm_i.EntryId
-            WHERE cm_i.Mode = 'FI'
-        """
-        cur.execute(query_fi)
-        reissue_map = defaultdict(float)
-        for r in cur.fetchall():
-            party = str(r[0] or "").strip().upper()
-            pcs = float(r[4] or 0)
-            for val in (r[1], r[2], r[3]):
-                if val is not None:
-                    try:
-                        s_val = str(val).strip()
-                        if s_val and s_val != '0':
-                            ser_num = str(int(float(s_val)))
-                            reissue_map[f"{party}_{ser_num}"] += pcs
-                            break
-                    except:
-                        pass
-
-        # Step 2: Query FR rows
         select_part = """
             SELECT 
                 cm.Serial,
@@ -939,7 +897,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 cd.JobItem,
                 ISNULL(cd.Pcs, 0) as pcs,
                 ISNULL(cd.PlainPcs, 0) as plainpcs,
-                ISNULL(cd.RfPcs, 0) as raw_rfpcs,
+                ISNULL(cd.SPcs, 0) as raw_rfpcs,
                 ISNULL(cd.BalPcs, 0) as raw_balpcs,
                 ISNULL(cd.Rate, 0) as rate,
                 cd.JobType,
@@ -999,7 +957,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
         for r in raw_db_rows:
             d_val = r['Date']
             d_str = str(d_val)[:10] if d_val else ""
-            is_opening = bool(d_str and d_str < year_boundary)
+            is_opening = bool(d_str and d_str <= year_boundary)
 
             # Filtering based on Opening Mode
             if op_mode == "NO" and is_opening:
@@ -1010,55 +968,17 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
             jtype_raw = str(r['JobType'] or "").strip().upper()
             is_plain_type = jtype_raw in ('PLAIN', 'RETURN', 'SECOND', 'DEMAGE', 'SHT')
 
-            party = str(r['Party'] or "").strip().upper()
-            ser = r['Serial']
-            try:
-                ser_key = str(int(float(ser))) if ser is not None else ""
-            except:
-                ser_key = str(ser).strip() if ser else ""
-
-            avail_reissue = reissue_map.get(f"{party}_{ser_key}", 0.0)
-
             raw_pcs = float(r['pcs'] or 0)
             plainpcs = float(r['plainpcs'] or 0)
             raw_rfpcs = float(r['raw_rfpcs'] or 0)
-            recpcs_raw = float(r['recpcs_raw'] or 0)
             secpcs = float(r['secpcs'] or 0)
             shtpcs = float(r['shtpcs'] or 0)
-            spcs = 0.0
-            retpcs = 0.0
-            wastepcs = 0.0
+            spcs = float(r['spcs'] or 0)
+            retpcs = float(r['retpcs'] or 0)
+            wastepcs = float(r['wastepcs'] or 0)
 
-            # RfPcs is still computed (preferring the actual FI-linked reissue amount over
-            # the stale cd.RfPcs column) purely for DISPLAY in the "rfpcs" output field.
-            # It is intentionally NOT subtracted in the balance formula below - see fix note.
-            if avail_reissue > 0:
-                calc_rfpcs = min(recpcs_raw if recpcs_raw > 0 else raw_pcs, avail_reissue)
-                reissue_map[f"{party}_{ser_key}"] = max(0.0, avail_reissue - calc_rfpcs)
-            else:
-                calc_rfpcs = raw_rfpcs
-
-            # Formula (verified with user data: JOB expected total 7617):
-            # JOB rows:   raw_pcs = total received from reprocess
-            #             recpcs_raw = pcs re-issued/transferred further
-            #             Balance = raw_pcs - recpcs_raw  (38213 - 30596 = 7617 ✓)
-            # PLAIN rows: plainpcs as source, minus any re-issued (calc_rfpcs)
-            if is_plain_type:
-                # PLAIN/RETURN/SECOND/SHT/DEMAGE
-                calc_plain = plainpcs if plainpcs > 0 else raw_pcs
-                pcs = 0.0
-                calc_recpcs = 0.0
-                # PLAIN mein bhi re-issue deduct karo (user confirmed)
-                calc_balpcs = max(0.0, calc_plain - calc_rfpcs)
-                out_jobtype = "PLAIN"
-            else:
-                # JOB: total received - re-issued = balance
-                pcs = raw_pcs
-                calc_recpcs = recpcs_raw
-                calc_plain = 0.0
-                # balpcs = raw_pcs - recpcs_raw (RecPcs = re-issued pcs in this ERP)
-                calc_balpcs = max(0.0, pcs - recpcs_raw)
-                out_jobtype = "JOB"
+            # Desktop ERP Ground Truth Formula: BALPCS = (PCS + PLAINPCS) - RFPCS
+            calc_balpcs = max(0.0, (raw_pcs + plainpcs) - raw_rfpcs)
 
             # Filter by JobType: JOB vs PLAIN vs ALL
             jt_filter = str(job_type or "All").strip().upper()
@@ -1094,10 +1014,10 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 "date": r['date_str'] or "",
                 "jobber": str(r['Party']).strip() if r['Party'] else "",
                 "jobitem": str(r['JobItem']).strip() if r['JobItem'] else (str(r['ItemName']).strip() if r['ItemName'] else ""),
-                "pcs": pcs,
-                "plainpcs": calc_plain,
-                "rfpcs": calc_rfpcs,
-                "recpcs": calc_recpcs,
+                "pcs": raw_pcs,
+                "plainpcs": plainpcs,
+                "rfpcs": raw_rfpcs,
+                "recpcs": float(r['recpcs_raw'] or 0),
                 "secpcs": secpcs,
                 "shtpcs": shtpcs,
                 "spcs": spcs,
@@ -1105,7 +1025,7 @@ def query_job_reprocess_report(sql_settings, job_type="All", status="Pending", j
                 "wastepcs": wastepcs,
                 "balpcs": calc_balpcs,
                 "rate": float(r['rate'] or 0),
-                "jobtype": out_jobtype,
+                "jobtype": jtype_raw or "JOB",
                 "stat": stat,
                 "inwtype": str(r['InwType']).strip() if r['InwType'] else "",
                 "agent": str(r['Agent']).strip() if r['Agent'] else "",

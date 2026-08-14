@@ -119,7 +119,7 @@ def export_all_reports_snapshot(sql_settings, local_db):
 
     # 4. Reprocess Stock Report
     try:
-        snapshot["reports"]["reprocess_stock"] = query_job_reprocess_report(sql_settings, status="All")
+        snapshot["reports"]["reprocess_stock"] = query_job_reprocess_report(sql_settings, status="All", include_opening=True)
     except Exception as e:
         snapshot["reports"]["reprocess_stock"] = []
         print(f"Cloud Export Reprocess Stock Error: {e}")
