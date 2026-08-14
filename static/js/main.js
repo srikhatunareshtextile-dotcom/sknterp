@@ -2,6 +2,36 @@ window.allChallanImagesMap = window.allChallanImagesMap || {};
 window.allGroupImagesMap = window.allGroupImagesMap || {};
 window.itemChallanMap = window.itemChallanMap || {};
 
+// ---------------------------------------------------------------------
+// smartMatch: whole-word / exact-token search matcher (used everywhere
+// search boxes filter tables/cards). Fixes the "GO" also matching
+// "GODAVARI" problem — a search term only matches when it appears as a
+// complete word/token inside the text, not as a partial substring of a
+// longer word. Multi-word queries (e.g. "VIRAL GIRL") still work because
+// spaces/punctuation count as word boundaries on both sides.
+// ---------------------------------------------------------------------
+window.smartMatch = function smartMatch(text, query) {
+  if (query === undefined || query === null) return true;
+  query = String(query).trim();
+  if (query === '') return true; // empty search = show everything
+  if (text === undefined || text === null) return false;
+  text = String(text);
+
+  function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  try {
+    const re = new RegExp('(^|[^A-Za-z0-9])' + escapeRegex(query) + '($|[^A-Za-z0-9])', 'i');
+    // Pad with spaces so a match at the very start/end of the string still
+    // has a boundary character on each side.
+    return re.test(' ' + text + ' ');
+  } catch (e) {
+    // Fallback to plain substring match if query has bad regex chars
+    return text.toUpperCase().indexOf(query.toUpperCase()) !== -1;
+  }
+};
+
 window.loadAllChallanImagesMap = async function() {
   try {
     const res = await fetch('/api/challan/all_images_map');
@@ -258,39 +288,79 @@ window.sknReconcileLocalPhotos = async function(serverImagesMap) {
 // ══════════════════════════════════════════════════════════════════════════
 window.globalZoomStates = { as: 1.0, od: 1.0, ps: 1.0, req: 1.0, br: 1.0, oos: 1.0, ji: 1.0, jr: 1.0, fp: 1.0 };
 
-window.switchViewMode = function(prefix, mode) {
-  const tableBtn = document.getElementById(`${prefix}-btn-table-mode`);
-  const cardBtn = document.getElementById(`${prefix}-btn-card-mode`);
-  const wrapper = document.getElementById(`${prefix}-table-wrapper`);
-  const toolbar = document.getElementById(`${prefix}-zoom-toolbar`);
-  
-  let listEl = document.getElementById(`${prefix}-list`);
-  if (!listEl) {
-    if (prefix === 'as') listEl = document.getElementById('all-stock-list');
-    else if (prefix === 'od') listEl = document.getElementById('od-list');
-    else if (prefix === 'ps') listEl = document.getElementById('pur-stock-list');
-    else if (prefix === 'req') listEl = document.getElementById('req-report-list');
-    else if (prefix === 'oos') listEl = document.getElementById('oos-report-list');
-    else if (prefix === 'br') listEl = document.getElementById('br-list');
-    else if (prefix === 'ji') listEl = document.getElementById('ji-list');
-    else if (prefix === 'jr') listEl = document.getElementById('jr-list');
-  }
+// Some tabs' card-list container id does not simply follow "<prefix>-list"
+// (e.g. All Stock's real id is "all-stock-list", not "as-list"). This alias
+// map is the single source of truth for resolving the real id per prefix —
+// this was the root cause of Card View silently doing nothing on the
+// REQ / OOS / All Stock / Purchase Stock tabs (the id lookup failed, so the
+// button appeared to do nothing).
+window.CARD_LIST_ID_ALIASES = {
+  as: 'all-stock-list',
+  od: 'od-list',
+  ps: 'pur-stock-list',
+  req: 'req-report-list',
+  oos: 'oos-report-list',
+  br: 'br-list',
+  ji: 'ji-list',
+  jr: 'jr-list',
+  slips: 'slips-list'
+};
 
-  if (mode === 'table') {
-    if (tableBtn) { tableBtn.classList.add("btn-primary", "active"); tableBtn.classList.remove("btn-secondary"); }
-    if (cardBtn) { cardBtn.classList.add("btn-secondary"); cardBtn.classList.remove("btn-primary", "active"); }
-    if (wrapper) wrapper.style.display = "block";
-    if (toolbar) toolbar.style.display = "flex";
-    if (listEl) listEl.style.display = "none";
-  } else {
-    if (cardBtn) { cardBtn.classList.add("btn-primary", "active"); cardBtn.classList.remove("btn-secondary"); }
-    if (tableBtn) { tableBtn.classList.add("btn-secondary"); tableBtn.classList.remove("btn-primary", "active"); }
-    if (wrapper) wrapper.style.display = "none";
-    if (toolbar) toolbar.style.display = "none";
-    if (listEl) listEl.style.display = "grid";
+window.switchViewMode = function(prefix, mode) {
+  const tableWrapper = document.getElementById(prefix + "-table-wrapper");
+  const listWrapper = document.getElementById(window.CARD_LIST_ID_ALIASES[prefix] || (prefix + "-list"));
+  const summaryWrapper = document.getElementById(prefix + "-summary-wrapper");
+  const zoomToolbar = document.getElementById(prefix + "-zoom-toolbar");
+
+  const btnTable = document.getElementById(prefix + "-btn-table-mode");
+  const btnCard = document.getElementById(prefix + "-btn-card-mode");
+  const btnSummary = document.getElementById(prefix + "-btn-summary-mode");
+
+  [btnTable, btnCard, btnSummary].forEach(btn => {
+    if (btn) {
+      btn.classList.remove("btn-primary", "active");
+      btn.classList.add("btn-secondary");
+    }
+  });
+
+  if (mode === "table") {
+    if (tableWrapper) tableWrapper.style.display = "block";
+    if (listWrapper) listWrapper.style.display = "none";
+    if (summaryWrapper) summaryWrapper.style.display = "none";
+    if (zoomToolbar) zoomToolbar.style.display = "flex";
+    if (btnTable) {
+      btnTable.classList.remove("btn-secondary");
+      btnTable.classList.add("btn-primary", "active");
+    }
+    if (typeof window.syncTableViewsAllTabs === "function") {
+      window.syncTableViewsAllTabs();
+    }
+  } else if (mode === "card") {
+    if (tableWrapper) tableWrapper.style.display = "none";
+    if (listWrapper) listWrapper.style.display = "grid";
+    if (summaryWrapper) summaryWrapper.style.display = "none";
+    if (zoomToolbar) zoomToolbar.style.display = "none";
+    if (btnCard) {
+      btnCard.classList.remove("btn-secondary");
+      btnCard.classList.add("btn-primary", "active");
+    }
+  } else if (mode === "summary") {
+    if (tableWrapper) tableWrapper.style.display = "none";
+    if (listWrapper) listWrapper.style.display = "none";
+    if (summaryWrapper) summaryWrapper.style.display = "block";
+    if (zoomToolbar) zoomToolbar.style.display = "flex";
+    if (btnSummary) {
+      btnSummary.classList.remove("btn-secondary");
+      btnSummary.classList.add("btn-primary", "active");
+    }
   }
 };
 
+// Table Zoom Controls — uses a CSS custom property + transform:scale (set in
+// style.css) rather than the non-standard `style.zoom` property, since zoom
+// is not supported in Firefox and behaves inconsistently across mobile
+// browsers. Applies to both the table wrapper and (if present) the summary
+// wrapper, for every tab prefix.
 window.zoomTable = function(prefix, delta) {
   if (!window.globalZoomStates[prefix]) window.globalZoomStates[prefix] = 1.0;
   if (delta === 0) {
@@ -299,14 +369,17 @@ window.zoomTable = function(prefix, delta) {
     window.globalZoomStates[prefix] = Math.min(Math.max(window.globalZoomStates[prefix] + delta, 0.6), 2.5);
   }
   const zoomPercent = Math.round(window.globalZoomStates[prefix] * 100) + "%";
-  
+
   const badge = document.getElementById(`${prefix}-zoom-level`);
   if (badge) badge.textContent = zoomPercent;
 
   const wrapper = document.getElementById(`${prefix}-table-wrapper`);
-  if (wrapper) {
-    wrapper.style.setProperty("--table-zoom-scale", window.globalZoomStates[prefix].toString());
-  }
+  const summaryWrapper = document.getElementById(`${prefix}-summary-wrapper`);
+  [wrapper, summaryWrapper].forEach(w => {
+    if (w) {
+      w.style.setProperty("--table-zoom-scale", window.globalZoomStates[prefix].toString());
+    }
+  });
 };
 
 window.syncTableViewsAllTabs = function() {
@@ -502,7 +575,11 @@ document.addEventListener("DOMContentLoaded", () => {
     switchTab("slips");
     openAddSlipModal();
   });
+  const quickViewSlips = document.getElementById("quick-view-slips");
+  if (quickViewSlips) quickViewSlips.addEventListener("click", () => switchTab("slips"));
   document.getElementById("quick-view-req").addEventListener("click", () => switchTab("req"));
+  const quickViewOos = document.getElementById("quick-view-oos");
+  if (quickViewOos) quickViewOos.addEventListener("click", () => switchTab("oos-report"));
   const quickEditSettings = document.getElementById("quick-edit-settings");
   if (quickEditSettings) {
     quickEditSettings.addEventListener("click", () => switchTab("settings"));
@@ -515,6 +592,16 @@ document.addEventListener("DOMContentLoaded", () => {
   if (quickJobReprocess) {
     quickJobReprocess.addEventListener("click", () => switchTab("job-reprocess"));
   }
+  const quickAllStock = document.getElementById("quick-all-stock");
+  if (quickAllStock) quickAllStock.addEventListener("click", () => switchTab("all-stock"));
+  const quickPurchaseStock = document.getElementById("quick-purchase-stock");
+  if (quickPurchaseStock) quickPurchaseStock.addEventListener("click", () => switchTab("purchase-stock"));
+  const quickBillReport = document.getElementById("quick-bill-report");
+  if (quickBillReport) quickBillReport.addEventListener("click", () => switchTab("bill-report"));
+  const quickOrderDetails = document.getElementById("quick-order-details");
+  if (quickOrderDetails) quickOrderDetails.addEventListener("click", () => switchTab("order-details"));
+  const quickFoldingPayment = document.getElementById("quick-folding-payment");
+  if (quickFoldingPayment) quickFoldingPayment.addEventListener("click", () => switchTab("folding-payment"));
 
   // Drawer Control (Simple responsive side-nav overlay)
   const appDrawer = document.getElementById("app-drawer");
@@ -714,9 +801,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("slip-search-input").addEventListener("input", (e) => {
     const query = e.target.value.toLowerCase().trim();
     const filtered = allSlips.filter(slip => 
-      slip.party.toLowerCase().includes(query) || 
-      (slip.slip_no && slip.slip_no.toLowerCase().includes(query)) ||
-      (slip.group_name && slip.group_name.toLowerCase().includes(query))
+      smartMatch(slip.party, query) || 
+      (slip.slip_no && smartMatch(slip.slip_no, query)) ||
+      (slip.group_name && smartMatch(slip.group_name, query))
     );
     renderSlips(filtered);
   });
@@ -745,8 +832,21 @@ document.addEventListener("DOMContentLoaded", () => {
         if (document.getElementById("detail-haste")) {
           document.getElementById("detail-haste").textContent = slip.haste || "-";
         }
+        const hasteRow = document.getElementById("detail-haste-row");
+        if (hasteRow) hasteRow.style.display = slip.haste ? "" : "none";
+        if (document.getElementById("detail-agent")) {
+          document.getElementById("detail-agent").textContent = slip.agent || "-";
+        }
+        if (document.getElementById("detail-station")) {
+          document.getElementById("detail-station").textContent = slip.station || "-";
+        }
+        if (document.getElementById("detail-transport")) {
+          document.getElementById("detail-transport").textContent = slip.transport || "-";
+        }
         document.getElementById("detail-view-type").textContent = slip.view_type || "-";
         document.getElementById("detail-remarks").textContent = slip.remarks || "-";
+        const remarksRow = document.getElementById("detail-remarks-row");
+        if (remarksRow) remarksRow.style.display = slip.remarks ? "" : "none";
 
         // Render Pack Types in Modal Dropdown
         allPackTypes = data.pack_types || [];
@@ -768,10 +868,29 @@ document.addEventListener("DOMContentLoaded", () => {
       });
   }
 
+  // FEATURE: updates the slip detail summary card (Items / Groups / Total Pcs).
+  function setSlipSummaryCard(itemCount, groupCount, totalPcs) {
+    const itemsEl = document.getElementById("detail-total-items");
+    const groupsEl = document.getElementById("detail-total-groups");
+    const pcsEl = document.getElementById("detail-summary-total-pcs");
+    if (itemsEl) itemsEl.textContent = itemCount;
+    if (groupsEl) groupsEl.textContent = groupCount;
+    if (pcsEl) pcsEl.textContent = (typeof totalPcs === "number" ? totalPcs.toFixed(0) : totalPcs);
+  }
+
   function renderSlipItems(items) {
     const itemsList = document.getElementById("slip-items-list");
     if (items.length === 0) {
       itemsList.innerHTML = `<div class="empty-state"><i class="fa-solid fa-box"></i><p>No items added yet</p></div>`;
+      // BUG FIX: previously we returned here without clearing the print
+      // table / total-pcs, so switching to an empty slip left the PREVIOUS
+      // slip's print table and total visible/stale.
+      const printTableContainer = document.getElementById("slip-print-table");
+      if (printTableContainer) printTableContainer.innerHTML = "";
+      const totalDetailEl = document.getElementById("detail-total-pcs");
+      if (totalDetailEl) totalDetailEl.textContent = "0";
+      // FEATURE: summary card should also reset to zero for an empty slip.
+      setSlipSummaryCard(0, 0, 0);
       return;
     }
 
@@ -779,15 +898,22 @@ document.addEventListener("DOMContentLoaded", () => {
     items.forEach(item => {
       const card = document.createElement("div");
       card.className = "item-list-card";
+      const itemPhotoHtml = window.renderInlineGroupPhoto
+        ? window.renderInlineGroupPhoto(item.group_name, item.item_name)
+        : '';
       card.innerHTML = `
         <div class="item-title-row">
-          <span>${item.item_name}</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${itemPhotoHtml}
+            <span>${item.item_name}</span>
+          </div>
           <div style="display: flex; gap: 10px; align-items: center;">
             <button class="btn-icon-edit" data-id="${item.id}" style="background: none; border: none; color: var(--primary); cursor: pointer; font-size: 14px;"><i class="fa-solid fa-pen-to-square"></i></button>
             <button class="btn-icon-delete" data-id="${item.id}"><i class="fa-solid fa-trash-can"></i></button>
           </div>
         </div>
         <div class="item-sub-details">
+          <div class="grid-cell" data-label="Group"><span class="grid-cell-label">Group</span><span class="grid-cell-val">${item.group_name || '-'}</span></div>
           <div class="grid-cell" data-label="Order"><span class="grid-cell-label">Order</span><span class="grid-cell-val">${item.order_pcs}</span></div>
           <div class="grid-cell" data-label="Stock"><span class="grid-cell-label">Stock</span><span class="grid-cell-val">${item.stock_pcs}</span></div>
           <div class="grid-cell" data-label="Balance"><span class="grid-cell-label">Balance</span><span class="grid-cell-val">${item.bal_pcs}</span></div>
@@ -815,8 +941,45 @@ document.addEventListener("DOMContentLoaded", () => {
       const party = document.getElementById("detail-party").textContent;
       const group = document.getElementById("detail-group-name").textContent;
       const haste = document.getElementById("detail-haste") ? document.getElementById("detail-haste").textContent : "-";
+      const agent = document.getElementById("detail-agent") ? document.getElementById("detail-agent").textContent : "-";
+      const station = document.getElementById("detail-station") ? document.getElementById("detail-station").textContent : "-";
+      const transport = document.getElementById("detail-transport") ? document.getElementById("detail-transport").textContent : "-";
       const viewType = document.getElementById("detail-view-type").textContent;
       const remarks = document.getElementById("detail-remarks").textContent;
+
+      // Order No - collect all distinct order numbers used across items,
+      // shown as "Order No - 1/25/45" instead of one order number per row.
+      const distinctOrderNos = [...new Set(items.map(it => (it.order_no || "").toString().trim()).filter(Boolean))];
+      const orderNoDisplay = distinctOrderNos.length ? distinctOrderNos.join("/") : "-";
+
+      // Total packed pcs across all items on this slip
+      const totalPackPcs = items.reduce((sum, it) => sum + (parseFloat(it.pack_pcs) || 0), 0);
+      const totalDetailEl = document.getElementById("detail-total-pcs");
+      if (totalDetailEl) totalDetailEl.textContent = totalPackPcs.toFixed(0);
+
+      // FEATURE: populate the summary card (total items / groups / pcs).
+      const distinctGroupCount = new Set(items.map(it => (it.group_name || "(No Group)").trim())).size;
+      setSlipSummaryCard(items.length, distinctGroupCount, totalPackPcs);
+
+      let metaGridHtml = `
+            <div class="print-meta-item"><span class="print-meta-label">Slip No:</span><span class="print-meta-value">${slipNo}</span></div>
+            <div class="print-meta-item"><span class="print-meta-label">Date:</span><span class="print-meta-value">${slipDate}</span></div>
+            <div class="print-meta-item"><span class="print-meta-label">Party Name:</span><span class="print-meta-value" style="font-weight: 700;">${party}</span></div>
+            <div class="print-meta-item"><span class="print-meta-label">Group Name:</span><span class="print-meta-value">${group}</span></div>
+            <div class="print-meta-item"><span class="print-meta-label">Order No -</span><span class="print-meta-value">${orderNoDisplay}</span></div>`;
+      if (agent && agent !== "-") {
+        metaGridHtml += `<div class="print-meta-item"><span class="print-meta-label">Agent Name:</span><span class="print-meta-value">${agent}</span></div>`;
+      }
+      if (haste && haste !== "-") {
+        metaGridHtml += `<div class="print-meta-item"><span class="print-meta-label">Haste (Broker):</span><span class="print-meta-value">${haste}</span></div>`;
+      }
+      if (station && station !== "-") {
+        metaGridHtml += `<div class="print-meta-item"><span class="print-meta-label">Station:</span><span class="print-meta-value">${station}</span></div>`;
+      }
+      if (transport && transport !== "-") {
+        metaGridHtml += `<div class="print-meta-item"><span class="print-meta-label">Transport:</span><span class="print-meta-value">${transport}</span></div>`;
+      }
+      metaGridHtml += `<div class="print-meta-item"><span class="print-meta-label">Selection Type:</span><span class="print-meta-value">${viewType}</span></div>`;
 
       let tableHtml = `
         <div class="print-header">
@@ -824,20 +987,16 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="print-subtitle">Packing Slip Details Report</div>
           
           <div class="print-meta-grid">
-            <div class="print-meta-item"><span class="print-meta-label">Slip No:</span><span class="print-meta-value">${slipNo}</span></div>
-            <div class="print-meta-item"><span class="print-meta-label">Date:</span><span class="print-meta-value">${slipDate}</span></div>
-            <div class="print-meta-item"><span class="print-meta-label">Party Name:</span><span class="print-meta-value" style="font-weight: 700;">${party}</span></div>
-            <div class="print-meta-item"><span class="print-meta-label">Group Name:</span><span class="print-meta-value">${group}</span></div>
-            <div class="print-meta-item"><span class="print-meta-label">Haste (Broker):</span><span class="print-meta-value">${haste}</span></div>
-            <div class="print-meta-item"><span class="print-meta-label">Selection Type:</span><span class="print-meta-value">${viewType}</span></div>
+            ${metaGridHtml}
           </div>
           ${remarks && remarks !== "-" ? `<div style="margin-top: 8px; font-size: 11px; font-style: italic;"><strong>Remarks:</strong> ${remarks}</div>` : ""}
         </div>
         <table class="print-table">
           <thead>
             <tr>
-              <th style="width: 5%;">#</th>
-              <th style="width: 45%;">Item Name</th>
+              <th style="width: 4%;">#</th>
+              <th style="width: 32%;">Item Name</th>
+              <th style="width: 14%;">Group Name</th>
               <th style="width: 12%;">Order Pcs</th>
               <th style="width: 12%;">Stock Pcs</th>
               <th style="width: 12%;">Balance Pcs</th>
@@ -847,23 +1006,77 @@ document.addEventListener("DOMContentLoaded", () => {
           <tbody>
       `;
       
-      items.forEach((item, idx) => {
-        tableHtml += `
+      // FEATURE: group-wise summary totals. Group items by group_name
+      // (preserving the order each group first appears) and print a
+      // subtotal row whenever a group's items are finished.
+      const groupsInOrder = [];
+      const itemsByGroup = new Map();
+      items.forEach(item => {
+        const g = item.group_name || "(No Group)";
+        if (!itemsByGroup.has(g)) {
+          itemsByGroup.set(g, []);
+          groupsInOrder.push(g);
+        }
+        itemsByGroup.get(g).push(item);
+      });
+
+      let rowIdx = 0;
+      groupsInOrder.forEach(g => {
+        const groupItems = itemsByGroup.get(g);
+        let groupPackPcs = 0;
+        groupItems.forEach(item => {
+          rowIdx++;
+          groupPackPcs += parseFloat(item.pack_pcs) || 0;
+          tableHtml += `
           <tr>
-            <td>${idx + 1}</td>
+            <td>${rowIdx}</td>
             <td style="font-weight: bold;">${item.item_name}</td>
+            <td>${item.group_name || '-'}</td>
             <td>${item.order_pcs}</td>
             <td>${item.stock_pcs}</td>
             <td>${item.bal_pcs}</td>
             <td style="font-weight: bold; color: #1e70e6;">${item.pack_pcs} ${item.pack_type || 'PCS'}</td>
           </tr>
         `;
+        });
+        // Only show a group subtotal when there's more than one group,
+        // otherwise it just duplicates the grand total below.
+        if (groupsInOrder.length > 1) {
+          tableHtml += `
+            <tr class="print-group-subtotal-row">
+              <td colspan="6" style="text-align: right; font-weight: 700;">Subtotal (${g}):</td>
+              <td style="font-weight: 700;">${groupPackPcs.toFixed(0)} PCS</td>
+            </tr>
+          `;
+        }
       });
-      
+
       tableHtml += `
+            <tr class="print-total-row" style="font-weight: 800; border-top: 2px solid #333;">
+              <td colspan="6" style="text-align: right;">TOTAL:</td>
+              <td style="color: #1e70e6;">${totalPackPcs.toFixed(0)} PCS</td>
+            </tr>
           </tbody>
         </table>
       `;
+
+      // FEATURE: footer with print timestamp, and a signature line area.
+      const printedOn = new Date().toLocaleString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+      tableHtml += `
+        <div class="print-footer">
+          <span>Printed on: ${printedOn}</span>
+          <span>Total Items: ${items.length} | Total Packed: ${totalPackPcs.toFixed(0)} PCS</span>
+        </div>
+        <div class="print-signature-row">
+          <div class="print-signature-box"><div class="print-signature-line"></div><span>Prepared By</span></div>
+          <div class="print-signature-box"><div class="print-signature-line"></div><span>Checked By</span></div>
+          <div class="print-signature-box"><div class="print-signature-line"></div><span>Received By</span></div>
+        </div>
+      `;
+
       printTableContainer.innerHTML = tableHtml;
     }
   }
@@ -948,6 +1161,9 @@ document.addEventListener("DOMContentLoaded", () => {
       slip_no: document.getElementById("slip-no").value.trim(),
       group_name: document.getElementById("slip-group").value.trim(),
       haste: document.getElementById("slip-haste") ? document.getElementById("slip-haste").value.trim() : "",
+      agent: document.getElementById("slip-agent") ? document.getElementById("slip-agent").value.trim() : "",
+      station: document.getElementById("slip-station") ? document.getElementById("slip-station").value.trim() : "",
+      transport: document.getElementById("slip-transport") ? document.getElementById("slip-transport").value.trim() : "",
       view_type: "ALL",
       remarks: document.getElementById("slip-remarks").value.trim()
     };
@@ -964,6 +1180,10 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
           closeModal(modalAddSlip);
           document.getElementById("form-add-slip").reset();
+          // BUG FIX: native form.reset() only clears input VALUES, it does
+          // not remove the "Auto-filled" badges or .auto-filled class we
+          // added via JS, so they used to linger into the next new-slip form.
+          clearAutoFillIndicators();
           showToast(data.message || "Packing Slip Created!");
           loadPackingSlips();
           if (data.id) {
@@ -1230,19 +1450,33 @@ document.addEventListener("DOMContentLoaded", () => {
       .then(data => {
         const slip = data.slip;
         const items = data.items;
-        
-        let text = `*Packing Slip details - Sri Khatu Naresh Textile*\n\n`;
-        text += `*Party Name:* ${slip.party}\n`;
-        text += `*Date:* ${slip.slip_date}\n`;
+
+        const distinctOrderNos = [...new Set(items.map(it => (it.order_no || "").toString().trim()).filter(Boolean))];
+        const totalPackPcs = items.reduce((sum, it) => sum + (parseFloat(it.pack_pcs) || 0), 0);
+
+        let text = `📦 *PACKING SLIP - Sri Khatu Naresh Textile*\n`;
+        text += `━━━━━━━━━━━━━━━━━━━━━\n`;
         if (slip.slip_no) text += `*Slip No:* ${slip.slip_no}\n`;
+        text += `*Date:* ${slip.slip_date}\n`;
+        text += `*Party Name:* ${slip.party}\n`;
+        if (slip.group_name) text += `*Group Name:* ${slip.group_name}\n`;
+        if (distinctOrderNos.length) text += `*Order No -* ${distinctOrderNos.join("/")}\n`;
+        if (slip.agent) text += `*Agent Name:* ${slip.agent}\n`;
+        if (slip.haste) text += `*Haste (Broker):* ${slip.haste}\n`;
+        if (slip.station) text += `*Station:* ${slip.station}\n`;
+        if (slip.transport) text += `*Transport:* ${slip.transport}\n`;
         if (slip.remarks) text += `*Remarks:* ${slip.remarks}\n`;
-        text += `\n*Items:*\n`;
-        
+        text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+        text += `*ITEMS (${items.length}):*\n\n`;
+
         items.forEach((item, index) => {
-          text += `${index + 1}. *${item.item_name}*\n`;
+          text += `${index + 1}. *${item.item_name}*${item.group_name ? ` (${item.group_name})` : ''}\n`;
           text += `   Order: ${item.order_pcs} | Stock: ${item.stock_pcs} | Balance: ${item.bal_pcs}\n`;
-          text += `   Packed: ${item.pack_pcs} ${item.pack_type}\n\n`;
+          text += `   ✅ Packed: *${item.pack_pcs} ${item.pack_type}*\n\n`;
         });
+
+        text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+        text += `*TOTAL PACKED PCS: ${totalPackPcs.toFixed(0)}*\n`;
 
         const mobilePrompt = prompt("Enter receiver's mobile number with country code (e.g. 919876543210):\n(Leave empty to select contact inside WhatsApp)");
         if (mobilePrompt === null) return; // user cancelled
@@ -1930,6 +2164,72 @@ document.addEventListener("DOMContentLoaded", () => {
   const slipPartyInput = document.getElementById("slip-party");
   const slipHasteSelect = document.getElementById("slip-haste");
   
+  // Auto-fetch Agent, Station, Transport from order data
+  const autoFetchPartyDetails = (partyVal) => {
+    const agentInput = document.getElementById("slip-agent");
+    const stationInput = document.getElementById("slip-station");
+    const transportInput = document.getElementById("slip-transport");
+    if (!partyVal || !agentInput) return;
+
+    fetch(`/api/parties/${encodeURIComponent(partyVal)}/details`)
+      .then(res => res.json())
+      .then(details => {
+        // Only auto-fill if the field is currently empty (don't overwrite manual input)
+        if (agentInput && !agentInput.value.trim() && details.agent) {
+          agentInput.value = details.agent;
+          agentInput.classList.add("auto-filled");
+          showAutoFillBadge(agentInput, "Auto-filled ✓");
+        }
+        if (stationInput && !stationInput.value.trim() && details.station) {
+          stationInput.value = details.station;
+          stationInput.classList.add("auto-filled");
+          showAutoFillBadge(stationInput, "Auto-filled ✓");
+        }
+        if (transportInput && !transportInput.value.trim() && details.transport) {
+          transportInput.value = details.transport;
+          transportInput.classList.add("auto-filled");
+          showAutoFillBadge(transportInput, "Auto-filled ✓");
+        }
+      })
+      .catch(err => console.warn("Failed to fetch party details:", err));
+  };
+
+  // Show a small auto-fill indicator badge below the input
+  function showAutoFillBadge(inputEl, text) {
+    // Remove existing badge if any
+    const existingBadge = inputEl.parentElement.querySelector(".auto-fill-badge");
+    if (existingBadge) existingBadge.remove();
+
+    const badge = document.createElement("span");
+    badge.className = "auto-fill-badge";
+    badge.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles" style="font-size:10px;"></i> ${text}`;
+    badge.style.cssText = "display:inline-flex; align-items:center; gap:4px; font-size:11px; color:#10b981; font-weight:600; margin-top:4px; animation: fadeIn 0.3s ease;";
+    inputEl.parentElement.appendChild(badge);
+
+    // Remove badge when user manually edits
+    const clearBadge = () => {
+      inputEl.classList.remove("auto-filled");
+      const b = inputEl.parentElement.querySelector(".auto-fill-badge");
+      if (b) b.remove();
+      inputEl.removeEventListener("input", clearBadge);
+    };
+    inputEl.addEventListener("input", clearBadge);
+  }
+
+  // BUG FIX helper: removes any leftover "Auto-filled" badges and the
+  // .auto-filled highlight class from the slip Agent/Station/Transport
+  // fields. Call this whenever the new-slip form is reset so stale badges
+  // from a previous slip don't carry over.
+  function clearAutoFillIndicators() {
+    ["slip-agent", "slip-station", "slip-transport"].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove("auto-filled");
+      const badge = el.parentElement ? el.parentElement.querySelector(".auto-fill-badge") : null;
+      if (badge) badge.remove();
+    });
+  }
+
   if (slipPartyInput && slipHasteSelect) {
     const updateHasteDropdown = () => {
       const partyVal = slipPartyInput.value.trim();
@@ -1954,8 +2254,14 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     };
     
-    slipPartyInput.addEventListener("change", updateHasteDropdown);
-    slipPartyInput.addEventListener("blur", updateHasteDropdown);
+    const onPartyChange = () => {
+      const partyVal = slipPartyInput.value.trim();
+      updateHasteDropdown();
+      autoFetchPartyDetails(partyVal);
+    };
+
+    slipPartyInput.addEventListener("change", onPartyChange);
+    slipPartyInput.addEventListener("blur", onPartyChange);
   }
 
   // Populate Haste dynamically for Order Details when party is selected
@@ -2082,7 +2388,7 @@ function filterAndRenderAllStock() {
 
     let filtered = allStockData;
     if (searchQuery) {
-      filtered = filtered.filter(row => row.group_name.toUpperCase().includes(searchQuery));
+      filtered = filtered.filter(row => smartMatch(row.group_name, searchQuery));
     }
     if (nonZeroOnly) {
       filtered = filtered.filter(row => row.total_stock_pcs !== 0);
@@ -2180,6 +2486,10 @@ function filterAndRenderAllStock() {
     document.getElementById("as-total-ji").textContent = totalJi;
     document.getElementById("as-total-jr").textContent = totalJr;
     document.getElementById("as-total-all").textContent = totalAll;
+
+    if (typeof window.syncTableViewsAllTabs === "function") {
+      window.syncTableViewsAllTabs();
+    }
   }
 
   // --- 8. Order Details Functions ---
@@ -2235,10 +2545,10 @@ function filterAndRenderAllStock() {
     let filtered = allOrderDetails;
     if (searchQuery) {
       filtered = filtered.filter(row => 
-        row.party.toUpperCase().includes(searchQuery) ||
-        row.group_name.toUpperCase().includes(searchQuery) ||
-        row.item_name.toUpperCase().includes(searchQuery) ||
-        row.order_no.toUpperCase().includes(searchQuery)
+        smartMatch(row.party, searchQuery) ||
+        smartMatch(row.group_name, searchQuery) ||
+        smartMatch(row.item_name, searchQuery) ||
+        smartMatch(row.order_no, searchQuery)
       );
     }
     if (oosOnly) {
@@ -2354,6 +2664,10 @@ function filterAndRenderAllStock() {
     document.getElementById("od-total-orders").textContent = totalOrders;
     document.getElementById("od-total-pcs").textContent = Math.round(totalOrderPcs);
     document.getElementById("od-total-bal").textContent = Math.round(totalBalPcs);
+
+    if (typeof window.syncTableViewsAllTabs === "function") {
+      window.syncTableViewsAllTabs();
+    }
   }
 
   // --- 9. Print Handler ---
@@ -2429,6 +2743,18 @@ function filterAndRenderAllStock() {
   const waShareMessage = document.getElementById("wa-share-message");
 
   if (waShareContentType && waShareMessage) {
+    // Map dropdown values to tab ids + the DOM id of that view-section
+    const TAB_VIEW_MAP = {
+      slips: "slips",
+      "all-stock": "all-stock",
+      "purchase-stock": "purchase-stock",
+      "bill-report": "bill-report",
+      "order-details": "order-details",
+      "job-issue": "job-issue",
+      "job-reprocess": "job-reprocess",
+      "folding-payment": "folding-payment"
+    };
+
     waShareContentType.addEventListener("change", () => {
       const type = waShareContentType.value;
       if (type === "custom") {
@@ -2467,6 +2793,20 @@ function filterAndRenderAllStock() {
           .catch(err => {
             waShareMessage.value = "Failed to load report data from server.";
           });
+      } else if (TAB_VIEW_MAP[type]) {
+        // Any other tab's report: load that tab's data in the background
+        // (its section stays in the DOM even while Home is showing), then
+        // build a labeled WhatsApp message from its table and switch back
+        // to Home so the message shows up in the textarea here.
+        waShareMessage.value = "Fetching report data...";
+        const originalTab = currentActiveTab;
+        switchTab(TAB_VIEW_MAP[type]);
+        setTimeout(() => {
+          const targetView = document.getElementById("view-" + TAB_VIEW_MAP[type]);
+          const text = window.buildWhatsAppTextForView(targetView);
+          switchTab(originalTab || "home");
+          waShareMessage.value = text || "No data found for this report.";
+        }, 1500);
       }
     });
   }
@@ -2494,11 +2834,19 @@ function filterAndRenderAllStock() {
   if (btnWaSharePdf) {
     btnWaSharePdf.addEventListener("click", () => {
       const type = waShareContentType ? waShareContentType.value : "custom";
+      const TAB_VIEW_MAP_PDF = {
+        slips: "slips", "all-stock": "all-stock", "purchase-stock": "purchase-stock",
+        "bill-report": "bill-report", "order-details": "order-details", "job-issue": "job-issue",
+        "job-reprocess": "job-reprocess", "folding-payment": "folding-payment"
+      };
       if (type === "req") {
         switchTab("req");
         setTimeout(() => window.print(), 500);
       } else if (type === "oos" || type === "custom") {
         switchTab("oos-report");
+        setTimeout(() => window.print(), 500);
+      } else if (TAB_VIEW_MAP_PDF[type]) {
+        switchTab(TAB_VIEW_MAP_PDF[type]);
         setTimeout(() => window.print(), 500);
       }
     });
@@ -2749,6 +3097,10 @@ function filterAndRenderAllStock() {
     document.getElementById("ps-total-items").textContent = totalEntries;
     document.getElementById("ps-total-pcs").textContent = totalPcs.toFixed(0);
     document.getElementById("ps-total-bal").textContent = totalBal.toFixed(0);
+
+    if (typeof window.syncTableViewsAllTabs === "function") {
+      window.syncTableViewsAllTabs();
+    }
   }
 
   // Bind events for Purchase Stock
@@ -2837,11 +3189,11 @@ function filterAndRenderAllStock() {
 
     let filtered = allBillReportData.filter(item => {
       if (!searchTerm) return true;
-      return item.bill_no.toLowerCase().includes(searchTerm) ||
-             item.party_name.toLowerCase().includes(searchTerm) ||
-             item.group_name.toLowerCase().includes(searchTerm) ||
-             item.item_name.toLowerCase().includes(searchTerm) ||
-             item.date.toLowerCase().includes(searchTerm);
+      return smartMatch(item.bill_no, searchTerm) ||
+             smartMatch(item.party_name, searchTerm) ||
+             smartMatch(item.group_name, searchTerm) ||
+             smartMatch(item.item_name, searchTerm) ||
+             smartMatch(item.date, searchTerm);
     });
 
     if (filtered.length === 0) {
@@ -3136,17 +3488,17 @@ function filterAndRenderAllStock() {
     return allJobIssueData.filter(row => {
       if (!searchTerm) return true;
       return (
-        (row.date && row.date.toLowerCase().includes(searchTerm)) ||
-        (row.jobber && row.jobber.toLowerCase().includes(searchTerm)) ||
-        (row.isssr && row.isssr.toLowerCase().includes(searchTerm)) ||
-        (row.jobitem && row.jobitem.toLowerCase().includes(searchTerm)) ||
-        (row.itemname && row.itemname.toLowerCase().includes(searchTerm)) ||
-        (row.agent && row.agent.toLowerCase().includes(searchTerm)) ||
-        (row.series && row.series.toLowerCase().includes(searchTerm)) ||
-        (row.lotno && row.lotno.toLowerCase().includes(searchTerm)) ||
-        (row.fabrics && row.fabrics.toLowerCase().includes(searchTerm)) ||
-        (row.purchase_bill_no && row.purchase_bill_no.toLowerCase().includes(searchTerm)) ||
-        (row.inwtype && row.inwtype.toLowerCase().includes(searchTerm))
+        (row.date && smartMatch(row.date, searchTerm)) ||
+        (row.jobber && smartMatch(row.jobber, searchTerm)) ||
+        (row.isssr && smartMatch(row.isssr, searchTerm)) ||
+        (row.jobitem && smartMatch(row.jobitem, searchTerm)) ||
+        (row.itemname && smartMatch(row.itemname, searchTerm)) ||
+        (row.agent && smartMatch(row.agent, searchTerm)) ||
+        (row.series && smartMatch(row.series, searchTerm)) ||
+        (row.lotno && smartMatch(row.lotno, searchTerm)) ||
+        (row.fabrics && smartMatch(row.fabrics, searchTerm)) ||
+        (row.purchase_bill_no && smartMatch(row.purchase_bill_no, searchTerm)) ||
+        (row.inwtype && smartMatch(row.inwtype, searchTerm))
       );
     });
   }
@@ -3210,22 +3562,20 @@ function filterAndRenderAllStock() {
         }
         groups[val].rows.push(row);
         groups[val].count += 1;
-        if (!row.is_opening) {
-          groups[val].pcs += row.pcs;
-          groups[val].plainpcs += row.plainpcs;
-          groups[val].recpcs += row.recpcs;
-          groups[val].secpcs += row.secpcs;
-          groups[val].shtpcs += row.shtpcs;
-          groups[val].wastepcs += row.wastepcs;
-          groups[val].retpcs += row.retpcs;
-          totalPcs += row.pcs;
-          totalPlainPcs += row.plainpcs;
-          totalRecPcs += row.recpcs;
-          totalSecPcs += row.secpcs;
-          totalShtPcs += row.shtpcs;
-          totalWastePcs += row.wastepcs;
-          totalRetPcs += row.retpcs;
-        }
+        groups[val].pcs += row.pcs;
+        groups[val].plainpcs += row.plainpcs;
+        groups[val].recpcs += row.recpcs;
+        groups[val].secpcs += row.secpcs;
+        groups[val].shtpcs += row.shtpcs;
+        groups[val].wastepcs += row.wastepcs;
+        groups[val].retpcs += row.retpcs;
+        totalPcs += row.pcs;
+        totalPlainPcs += row.plainpcs;
+        totalRecPcs += row.recpcs;
+        totalSecPcs += row.secpcs;
+        totalShtPcs += row.shtpcs;
+        totalWastePcs += row.wastepcs;
+        totalRetPcs += row.retpcs;
         groups[val].balpcs += row.balpcs;
         totalBalPcs += row.balpcs;
       });
@@ -3324,15 +3674,13 @@ function filterAndRenderAllStock() {
 
       filtered.forEach(row => {
         const isOpening = row.is_opening === true;
-        if (!isOpening) {
-          totalPcs += row.pcs;
-          totalPlainPcs += row.plainpcs;
-          totalRecPcs += row.recpcs;
-          totalSecPcs += row.secpcs;
-          totalShtPcs += row.shtpcs;
-          totalWastePcs += row.wastepcs;
-          totalRetPcs += row.retpcs;
-        }
+        totalPcs += row.pcs;
+        totalPlainPcs += row.plainpcs;
+        totalRecPcs += row.recpcs;
+        totalSecPcs += row.secpcs;
+        totalShtPcs += row.shtpcs;
+        totalWastePcs += row.wastepcs;
+        totalRetPcs += row.retpcs;
         totalBalPcs += row.balpcs;
 
         const rowBg = isOpening ? 'background:#fef9c3;' : '';
@@ -3693,9 +4041,9 @@ function filterAndRenderAllStock() {
 
     const statusEl = document.querySelector('input[name="jr_status"]:checked');
     const statusVal = statusEl ? statusEl.value : "Pending";
-    const includeOpening = document.getElementById("jr-include-opening")?.checked ? "true" : "false";
+    const includeOpening = document.getElementById("jr-opening-mode")?.value || (document.getElementById("jr-include-opening")?.checked ? "true" : "false");
 
-    let url = `/api/job_reprocess_report?job_type=${encodeURIComponent(jobTypeParam)}&status=${encodeURIComponent(statusVal)}&jobber=${encodeURIComponent(jobber)}&item=${encodeURIComponent(item)}&inw_type=${encodeURIComponent(inwType)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_opening=${includeOpening}`;
+    let url = `/api/job_reprocess_report?job_type=${encodeURIComponent(jobTypeParam)}&status=${encodeURIComponent(statusVal)}&jobber=${encodeURIComponent(jobber)}&item=${encodeURIComponent(item)}&inw_type=${encodeURIComponent(inwType)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}&include_opening=${encodeURIComponent(includeOpening)}`;
 
     fetch(url)
       .then(res => res.json())
@@ -3729,17 +4077,17 @@ function filterAndRenderAllStock() {
     return allJobReprocessData.filter(row => {
       if (!searchTerm) return true;
       return (
-        (row.issno && row.issno.toLowerCase().includes(searchTerm)) ||
-        (row.recsr && row.recsr.toLowerCase().includes(searchTerm)) ||
-        (row.date && row.date.toLowerCase().includes(searchTerm)) ||
-        (row.jobber && row.jobber.toLowerCase().includes(searchTerm)) ||
-        (row.jobitem && row.jobitem.toLowerCase().includes(searchTerm)) ||
-        (row.itemname && row.itemname.toLowerCase().includes(searchTerm)) ||
-        (row.agent && row.agent.toLowerCase().includes(searchTerm)) ||
-        (row.series && row.series.toLowerCase().includes(searchTerm)) ||
-        (row.lotno && row.lotno.toLowerCase().includes(searchTerm)) ||
-        (row.jobtype && row.jobtype.toLowerCase().includes(searchTerm)) ||
-        (row.inwtype && row.inwtype.toLowerCase().includes(searchTerm))
+        (row.issno && smartMatch(row.issno, searchTerm)) ||
+        (row.recsr && smartMatch(row.recsr, searchTerm)) ||
+        (row.date && smartMatch(row.date, searchTerm)) ||
+        (row.jobber && smartMatch(row.jobber, searchTerm)) ||
+        (row.jobitem && smartMatch(row.jobitem, searchTerm)) ||
+        (row.itemname && smartMatch(row.itemname, searchTerm)) ||
+        (row.agent && smartMatch(row.agent, searchTerm)) ||
+        (row.series && smartMatch(row.series, searchTerm)) ||
+        (row.lotno && smartMatch(row.lotno, searchTerm)) ||
+        (row.jobtype && smartMatch(row.jobtype, searchTerm)) ||
+        (row.inwtype && smartMatch(row.inwtype, searchTerm))
       );
     });
   }
@@ -3798,20 +4146,18 @@ function filterAndRenderAllStock() {
         }
         groups[val].rows.push(row);
         groups[val].count += 1;
-        if (!row.is_opening) {
-          groups[val].pcs += row.pcs;
-          groups[val].recpcs += row.recpcs;
-          groups[val].plainpcs += row.plainpcs;
-          groups[val].rfpcs += row.rfpcs;
-          groups[val].secpcs += row.secpcs;
-          groups[val].shtpcs += row.shtpcs;
-          totalPcs += row.pcs;
-          totalRecPcs += row.recpcs;
-          totalPlainPcs += row.plainpcs;
-          totalRfPcs += row.rfpcs;
-          totalSecPcs += row.secpcs;
-          totalShtPcs += row.shtpcs;
-        }
+        groups[val].pcs += row.pcs;
+        groups[val].recpcs += row.recpcs;
+        groups[val].plainpcs += row.plainpcs;
+        groups[val].rfpcs += row.rfpcs;
+        groups[val].secpcs += row.secpcs;
+        groups[val].shtpcs += row.shtpcs;
+        totalPcs += row.pcs;
+        totalRecPcs += row.recpcs;
+        totalPlainPcs += row.plainpcs;
+        totalRfPcs += row.rfpcs;
+        totalSecPcs += row.secpcs;
+        totalShtPcs += row.shtpcs;
         groups[val].balpcs += row.balpcs;
         totalBalPcs += row.balpcs;
       });
@@ -3827,12 +4173,9 @@ function filterAndRenderAllStock() {
             <tr style="background:#0f172a; color:#ffffff;">
               <th style="text-align:left;">${groupPattern.toUpperCase()} GROUP</th>
               <th style="text-align:center;">CHALLANS</th>
-              <th style="text-align:right;">ISSUED PCS</th>
-              <th style="text-align:right;">REC PCS</th>
+              <th style="text-align:right;">PCS</th>
               <th style="text-align:right;">PLAIN PCS</th>
               <th style="text-align:right;">RF PCS</th>
-              <th style="text-align:right;">SEC PCS</th>
-              <th style="text-align:right;">SHT PCS</th>
               <th style="text-align:right;">BAL PCS</th>
             </tr>
           </thead>
@@ -3846,11 +4189,8 @@ function filterAndRenderAllStock() {
             <td style="text-align:left; color:#1d4ed8; font-size:13px;">${g.name}</td>
             <td style="text-align:center;"><span class="badge badge-info" style="background:#3b82f6; color:#fff; font-size:11px; padding:2px 8px;">${g.count}</span></td>
             <td style="text-align:right; color:#1d4ed8;">${g.pcs.toFixed(0)}</td>
-            <td style="text-align:right; color:#047857;">${g.recpcs.toFixed(0)}</td>
             <td style="text-align:right;">${g.plainpcs.toFixed(0)}</td>
             <td style="text-align:right; color:#047857;">${g.rfpcs.toFixed(0)}</td>
-            <td style="text-align:right;">${g.secpcs.toFixed(0)}</td>
-            <td style="text-align:right;">${g.shtpcs.toFixed(0)}</td>
             <td style="text-align:right; color:${g.balpcs > 0 ? '#dc2626' : '#0f172a'}; font-size:14px;">${g.balpcs.toFixed(0)}</td>
           </tr>
         `;
@@ -3861,11 +4201,8 @@ function filterAndRenderAllStock() {
           <td style="text-align:left;">GRAND TOTAL (${sortedGroupKeys.length} Groups / ${filtered.length} Entries):</td>
           <td style="text-align:center;">${filtered.length}</td>
           <td style="text-align:right; color:#1d4ed8; font-size:14px;">${totalPcs.toFixed(0)}</td>
-          <td style="text-align:right; color:#047857; font-size:14px;">${totalRecPcs.toFixed(0)}</td>
           <td style="text-align:right;">${totalPlainPcs.toFixed(0)}</td>
           <td style="text-align:right; color:#047857; font-size:14px;">${totalRfPcs.toFixed(0)}</td>
-          <td style="text-align:right;">${totalSecPcs.toFixed(0)}</td>
-          <td style="text-align:right;">${totalShtPcs.toFixed(0)}</td>
           <td style="text-align:right; color:#dc2626; font-size:15px;">${totalBalPcs.toFixed(0)}</td>
         </tr>
         </tbody></table>
@@ -3886,12 +4223,9 @@ function filterAndRenderAllStock() {
               <th>LOT NO</th>
               <th>SERIES</th>
               <th>PCS</th>
-              <th>RECPCS</th>
-              <th>PLAINPCS</th>
-              <th>RFPCS</th>
-              <th>SECPCS</th>
-              <th>SHTPCS</th>
-              <th>BALPCS</th>
+              <th>PLAIN PCS</th>
+              <th>RF PCS</th>
+              <th>BAL PCS</th>
               <th>RATE</th>
               <th>JOBTYPE</th>
               <th>INWARD TYPE</th>
@@ -3904,14 +4238,12 @@ function filterAndRenderAllStock() {
 
       filtered.forEach(row => {
         const isOpening = row.is_opening === true;
-        if (!isOpening) {
-          totalPcs += row.pcs;
-          totalRecPcs += row.recpcs;
-          totalPlainPcs += row.plainpcs;
-          totalRfPcs += row.rfpcs;
-          totalSecPcs += row.secpcs;
-          totalShtPcs += row.shtpcs;
-        }
+        totalPcs += row.pcs;
+        totalRecPcs += row.recpcs;
+        totalPlainPcs += row.plainpcs;
+        totalRfPcs += row.rfpcs;
+        totalSecPcs += row.secpcs;
+        totalShtPcs += row.shtpcs;
         totalBalPcs += row.balpcs;
 
         const rowBg = isOpening ? 'background:#fef9c3;' : '';
@@ -3935,11 +4267,8 @@ function filterAndRenderAllStock() {
             <td style="text-align:center; font-size:11px;">${row.lotno || '-'}</td>
             <td style="text-align:center; font-size:11px; font-weight:600;">${row.series || '-'}</td>
             <td style="text-align:right; font-weight:700; color:#1d4ed8;">${row.pcs.toFixed(0)}</td>
-            <td style="text-align:right; font-weight:700; color:#047857;">${row.recpcs.toFixed(0)}</td>
             <td style="text-align:right;">${row.plainpcs.toFixed(0)}</td>
             <td style="text-align:right; font-weight:700; color:#047857;">${row.rfpcs.toFixed(0)}</td>
-            <td style="text-align:right;">${row.secpcs.toFixed(0)}</td>
-            <td style="text-align:right;">${row.shtpcs.toFixed(0)}</td>
             <td style="text-align:right; font-weight:700; color:${row.balpcs > 0 ? '#dc2626' : '#0f172a'}; font-size:13px;">${row.balpcs.toFixed(0)}</td>
             <td style="text-align:right;">${isOpening ? '-' : '₹' + row.rate.toFixed(2)}</td>
             <td style="text-align:center; font-size:11px; font-weight:700;">${row.jobtype || '-'}</td>
@@ -3957,11 +4286,8 @@ function filterAndRenderAllStock() {
         <tr class="br-grand-total-row">
           <td colspan="10" style="text-align:right;">GRAND TOTAL (${filtered.length} entries):</td>
           <td style="text-align:right; color:#1d4ed8; font-size:14px;">${totalPcs.toFixed(0)}</td>
-          <td style="text-align:right; color:#047857; font-size:14px;">${totalRecPcs.toFixed(0)}</td>
           <td style="text-align:right;">${totalPlainPcs.toFixed(0)}</td>
           <td style="text-align:right; color:#047857; font-size:14px;">${totalRfPcs.toFixed(0)}</td>
-          <td style="text-align:right;">${totalSecPcs.toFixed(0)}</td>
-          <td style="text-align:right;">${totalShtPcs.toFixed(0)}</td>
           <td style="text-align:right; color:#dc2626; font-size:15px;">${totalBalPcs.toFixed(0)}</td>
           <td colspan="5"></td>
         </tr>
@@ -4109,10 +4435,19 @@ function filterAndRenderAllStock() {
   if (btnLoadJobReprocess) btnLoadJobReprocess.addEventListener("click", loadJobReprocessReport);
   const jrInwType = document.getElementById("jr-inw-type");
   if (jrInwType) jrInwType.addEventListener("change", loadJobReprocessReport);
-  const jrJobType = document.getElementById("jr-job-type");
+  // NOTE: this was previously looking up "jr-job-type" (with a hyphen), but
+  // the actual dropdown's id in the HTML is "jr-jobtype" (no hyphen) — so
+  // this listener was silently never attaching, and picking "JOB Only" /
+  // "PLAIN Only" in the JobType Filter did nothing until the user manually
+  // pressed "Load Job Reprocess Report" again.
+  const jrJobType = document.getElementById("jr-jobtype");
   if (jrJobType) jrJobType.addEventListener("change", loadJobReprocessReport);
   const jrIncludeOpening = document.getElementById("jr-include-opening");
   if (jrIncludeOpening) jrIncludeOpening.addEventListener("change", loadJobReprocessReport);
+  // "Opening Stock Mode" dropdown had no change listener at all — same
+  // "switch looks like it does nothing" symptom.
+  const jrOpeningMode = document.getElementById("jr-opening-mode");
+  if (jrOpeningMode) jrOpeningMode.addEventListener("change", loadJobReprocessReport);
 
   // Status Radio Change Listeners for Job Reprocess
   document.querySelectorAll('input[name="jr_status"]').forEach(r => {
@@ -4152,21 +4487,29 @@ window.exportCurrentViewToExcel = function(defaultName) {
   }
 };
 
-window.shareCurrentViewToWhatsApp = function() {
-  const activeView = document.querySelector('.view-section.active');
-  if (!activeView) return;
+window.buildWhatsAppTextForView = function(activeView) {
+  if (!activeView) return "";
   const title = activeView.querySelector('.view-title')?.innerText || "SKNT ERP Report";
-  
+
   let text = `📊 *${title.toUpperCase()}*\n📅 Date: ${new Date().toLocaleDateString('en-GB')}\n`;
   text += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   // Find table rows to format full itemized data
   const table = activeView.querySelector('.br-report-table-wrapper table') || activeView.querySelector('.print-only-table-container table') || activeView.querySelector('table');
-  
+
   if (table) {
     const rows = table.querySelectorAll("tr");
     let count = 0;
-    
+
+    // Capture the column header labels once, from the first header row found,
+    // so every data row below can be labeled ("Label: Value") instead of
+    // dumped as unlabeled "val1 | val2 | val3" (which was hard to read).
+    let columnLabels = [];
+    const headerRow = table.querySelector("thead tr") || table.querySelector("tr");
+    if (headerRow) {
+      columnLabels = Array.from(headerRow.querySelectorAll("th, td")).map(el => el.innerText.trim());
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       // Section Header (e.g. Party / GroupName / Order Date)
@@ -4175,7 +4518,14 @@ window.shareCurrentViewToWhatsApp = function() {
         text += `\n📂 *${headerText}*\n`;
         continue;
       }
-      
+
+      // Totals/grand-total rows: keep them clearly marked, not mixed into item list
+      if (row.className && row.className.toLowerCase().includes("total")) {
+        const totalText = row.innerText.trim().replace(/\s+/g, ' ');
+        if (totalText) text += `\n🔷 *${totalText}*\n`;
+        continue;
+      }
+
       const ths = row.querySelectorAll("th");
       if (ths.length > 0) continue; // Skip th
 
@@ -4183,12 +4533,18 @@ window.shareCurrentViewToWhatsApp = function() {
       if (tds.length >= 2) {
         count++;
         let rowLine = [];
-        tds.forEach((td) => {
+        tds.forEach((td, idx) => {
           const val = td.innerText.trim();
-          if (val) rowLine.push(val);
+          if (!val) return;
+          const label = columnLabels[idx];
+          if (label && label.length <= 20 && label !== val) {
+            rowLine.push(`${label}: ${val}`);
+          } else {
+            rowLine.push(val);
+          }
         });
         if (rowLine.length > 0) {
-          text += `▪️ ${rowLine.join(" | ")}\n`;
+          text += `▪️ ${rowLine.join(", ")}\n`;
         }
       }
       if (count >= 150) {
@@ -4204,80 +4560,25 @@ window.shareCurrentViewToWhatsApp = function() {
   }
 
   text += `\n━━━━━━━━━━━━━━━━━━━━━\nGenerated via SKNT ERP App`;
+  return text;
+};
+
+window.shareCurrentViewToWhatsApp = function() {
+  const activeView = document.querySelector('.view-section.active');
+  if (!activeView) return;
+  const text = window.buildWhatsAppTextForView(activeView);
   const waUrl = "https://api.whatsapp.com/send?text=" + encodeURIComponent(text);
   window.open(waUrl, "_blank");
 };
 
-// View Mode Switcher (Table / Card / Party Summary)
-window.switchViewMode = function(prefix, mode) {
-  const tableWrapper = document.getElementById(prefix + "-table-wrapper");
-  const listWrapper = document.getElementById(prefix + "-list");
-  const summaryWrapper = document.getElementById(prefix + "-summary-wrapper");
-  const zoomToolbar = document.getElementById(prefix + "-zoom-toolbar");
-
-  const btnTable = document.getElementById(prefix + "-btn-table-mode");
-  const btnCard = document.getElementById(prefix + "-btn-card-mode");
-  const btnSummary = document.getElementById(prefix + "-btn-summary-mode");
-
-  [btnTable, btnCard, btnSummary].forEach(btn => {
-    if (btn) {
-      btn.classList.remove("btn-primary", "active");
-      btn.classList.add("btn-secondary");
-    }
-  });
-
-  if (mode === "table") {
-    if (tableWrapper) tableWrapper.style.display = "block";
-    if (listWrapper) listWrapper.style.display = "none";
-    if (summaryWrapper) summaryWrapper.style.display = "none";
-    if (zoomToolbar) zoomToolbar.style.display = "flex";
-    if (btnTable) {
-      btnTable.classList.remove("btn-secondary");
-      btnTable.classList.add("btn-primary", "active");
-    }
-  } else if (mode === "card") {
-    if (tableWrapper) tableWrapper.style.display = "none";
-    if (listWrapper) listWrapper.style.display = "grid";
-    if (summaryWrapper) summaryWrapper.style.display = "none";
-    if (zoomToolbar) zoomToolbar.style.display = "none";
-    if (btnCard) {
-      btnCard.classList.remove("btn-secondary");
-      btnCard.classList.add("btn-primary", "active");
-    }
-  } else if (mode === "summary") {
-    if (tableWrapper) tableWrapper.style.display = "none";
-    if (listWrapper) listWrapper.style.display = "none";
-    if (summaryWrapper) summaryWrapper.style.display = "block";
-    if (zoomToolbar) zoomToolbar.style.display = "flex";
-    if (btnSummary) {
-      btnSummary.classList.remove("btn-secondary");
-      btnSummary.classList.add("btn-primary", "active");
-    }
-  }
-};
-
-// Table Zoom Controls
-const currentZoomLevels = {};
-window.zoomTable = function(prefix, delta) {
-  if (!currentZoomLevels[prefix]) currentZoomLevels[prefix] = 1.0;
-  if (delta === 0) {
-    currentZoomLevels[prefix] = 1.0;
-  } else {
-    currentZoomLevels[prefix] = Math.min(Math.max(currentZoomLevels[prefix] + delta, 0.5), 1.6);
-  }
-  const pct = Math.round(currentZoomLevels[prefix] * 100);
-  const badge = document.getElementById(prefix + "-zoom-level");
-  if (badge) badge.textContent = pct + "%";
-
-  const tableWrapper = document.getElementById(prefix + "-table-wrapper");
-  const summaryWrapper = document.getElementById(prefix + "-summary-wrapper");
-  [tableWrapper, summaryWrapper].forEach(w => {
-    if (w) {
-      const tbl = w.querySelector("table");
-      if (tbl) tbl.style.zoom = currentZoomLevels[prefix];
-    }
-  });
-};
+// NOTE: switchViewMode() and zoomTable() are defined once, near the top of
+// this file ("BULLETPROOF GLOBAL TABLE VIEW & ZOOM ENGINE"). They used to be
+// duplicated here with a second, less-complete implementation that silently
+// overrode the first (later script definitions win) — that duplicate was
+// missing the id-alias resolution for the req / oos / all-stock /
+// purchase-stock tabs, which is why Card View looked broken on exactly
+// those tabs. The duplicate has been removed; only one implementation now
+// exists, and it works for every tab.
 
 // Challan Detail Modal Handler
 window.openChallanModal = function(rowJson) {
@@ -4397,10 +4698,10 @@ function renderFoldingPaymentTable() {
   let filtered = allFoldingPaymentData.filter(r => {
     if (!query) return true;
     return (
-      (r.challan_no && r.challan_no.toLowerCase().includes(query)) ||
-      (r.series && r.series.toLowerCase().includes(query)) ||
-      (r.worker_name && r.worker_name.toLowerCase().includes(query)) ||
-      (r.job_item_name && r.job_item_name.toLowerCase().includes(query))
+      (r.challan_no && smartMatch(r.challan_no, query)) ||
+      (r.series && smartMatch(r.series, query)) ||
+      (r.worker_name && smartMatch(r.worker_name, query)) ||
+      (r.job_item_name && smartMatch(r.job_item_name, query))
     );
   });
 
